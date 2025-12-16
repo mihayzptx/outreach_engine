@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk'
 import { NextResponse } from 'next/server'
+import { sql } from '@vercel/postgres'
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
@@ -43,5 +44,13 @@ Write the message:`
     temperature: 0.7,
   })
 
-  return NextResponse.json({ message: completion.choices[0].message.content })
+  const generatedMessage = completion.choices[0].message.content
+
+  // Save to database
+  await sql`
+    INSERT INTO messages (prospect_name, prospect_title, company, industry, context, message_type, generated_message)
+    VALUES (${prospectName}, ${prospectTitle}, ${company}, ${industry}, ${context}, ${messageType}, ${generatedMessage})
+  `
+
+  return NextResponse.json({ message: generatedMessage })
 }
