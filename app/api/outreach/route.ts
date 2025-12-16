@@ -1,4 +1,5 @@
 import Groq from 'groq-sdk'
+import { Ollama } from 'ollama'
 import { NextResponse } from 'next/server'
 import { sql } from '@vercel/postgres'
 
@@ -6,8 +7,10 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
 })
 
+const ollama = new Ollama({ host: 'http://localhost:11434' })
+
 export async function POST(request: Request) {
-  const { prospectName, prospectTitle, company, industry, context, messageType } = await request.json()
+  const { prospectName, prospectTitle, company, industry, context, messageType, useLocal } = await request.json()
 
   const systemPrompt = `You write outreach for Tech-stack.io, a 200+ person DevOps services company.
 
@@ -35,16 +38,30 @@ Message Type: ${messageType}
 
 Write the message:`
 
-  const completion = await groq.chat.completions.create({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt }
-    ],
-    model: 'llama-3.3-70b-versatile',
-    temperature: 0.7,
-  })
+  let generatedMessage
 
-  const generatedMessage = completion.choices[0].message.content
+  if (useLocal) {
+    // Use local Ollama
+    const response = await ollama.chat({
+      model: 'llama3.1:8b',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+    })
+    generatedMessage = response.message.content
+  } else {
+    // Use Groq cloud
+    const completion = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.7,
+    })
+    generatedMessage = completion.choices[0].message.content
+  }
 
   // Save to database
   await sql`
