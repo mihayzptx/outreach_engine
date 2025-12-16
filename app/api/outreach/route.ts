@@ -7,8 +7,6 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
 })
 
-const ollama = new Ollama({ host: 'http://localhost:11434' })
-
 export async function POST(request: Request) {
   const { prospectName, prospectTitle, company, industry, context, messageType, useLocal } = await request.json()
 
@@ -41,15 +39,29 @@ Write the message:`
   let generatedMessage
 
   if (useLocal) {
-    // Use local Ollama
-    const response = await ollama.chat({
-      model: 'llama3.1:8b',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-    })
-    generatedMessage = response.message.content
+    // Try local Ollama, fallback to Groq if not available
+    try {
+      const ollama = new Ollama({ host: 'http://localhost:11434' })
+      const response = await ollama.chat({
+        model: 'llama3.1:8b',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+      })
+      generatedMessage = response.message.content
+    } catch (error) {
+      // Ollama not available, use Groq instead
+      const completion = await groq.chat.completions.create({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.7,
+      })
+      generatedMessage = completion.choices[0].message.content
+    }
   } else {
     // Use Groq cloud
     const completion = await groq.chat.completions.create({
