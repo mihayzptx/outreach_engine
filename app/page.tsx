@@ -13,6 +13,7 @@ export default function Home() {
     messageType: 'LinkedIn Connection Request'
   })
   
+  const [useLocal, setUseLocal] = useState(false)
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -23,7 +24,7 @@ export default function Home() {
     const response = await fetch('/api/outreach', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData)
+      body: JSON.stringify({...formData, useLocal})
     })
     
     const data = await response.json()
@@ -45,12 +46,26 @@ export default function Home() {
             </div>
             <p className="text-gray-600">AI-powered outreach message generator</p>
           </div>
-          <Link 
-            href="/history" 
-            className="px-6 py-3 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition"
-          >
-            View History
-          </Link>
+          <div className="flex gap-4">
+            <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-gray-300">
+              <span className="text-sm font-medium text-gray-700">Model:</span>
+              <button
+                onClick={() => setUseLocal(!useLocal)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${useLocal ? 'bg-blue-600' : 'bg-gray-300'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${useLocal ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+              <span className="text-sm font-medium text-gray-700">
+                {useLocal ? 'Local (Ollama)' : 'Cloud (Groq)'}
+              </span>
+            </div>
+            <Link 
+              href="/history" 
+              className="px-6 py-3 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition"
+            >
+              View History
+            </Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
