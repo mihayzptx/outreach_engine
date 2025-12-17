@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 
 export default function Home() {
   const [formData, setFormData] = useState({
@@ -20,11 +21,34 @@ export default function Home() {
   
   const [useLocal, setUseLocal] = useState(false)
   const [useWebResearch, setUseWebResearch] = useState(false)
+  const [saveCompany, setSaveCompany] = useState(false)
   const [message, setMessage] = useState('')
   const [displayedSources, setDisplayedSources] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    // Pre-fill from URL params when coming from Saved Companies
+    const company = searchParams.get('company')
+    if (company) {
+      setFormData({
+        prospectName: searchParams.get('prospectName') || '',
+        prospectTitle: searchParams.get('prospectTitle') || '',
+        company: company,
+        industry: searchParams.get('industry') || '',
+        context: searchParams.get('context') || '',
+        messageType: (searchParams.get('messageType') as any) || 'LinkedIn Connection',
+        messageHistory: '',
+        messageLength: 'medium',
+        toneOfVoice: 'professional',
+        targetResult: '',
+        sources: searchParams.get('sources') || ''
+      })
+    }
+  }, [searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,6 +77,27 @@ export default function Home() {
     // Add web research sources if returned
     if (data.researchSources && data.researchSources.length > 0) {
       setDisplayedSources(prev => [...prev, ...data.researchSources])
+    }
+    
+    // Save company if checkbox is checked
+    if (saveCompany) {
+      try {
+        await fetch('/api/companies/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_name: formData.company,
+            industry: formData.industry,
+            prospect_name: formData.prospectName,
+            prospect_title: formData.prospectTitle,
+            context: formData.context,
+            message_type: formData.messageType
+          })
+        })
+        console.log('✓ Company saved!')
+      } catch (error) {
+        console.error('Failed to save company:', error)
+      }
     }
     
     setLoading(false)
@@ -112,6 +157,14 @@ export default function Home() {
           >
             <span className="text-xl">📦</span>
             <span>Bulk Generate</span>
+          </Link>
+          <Link 
+            href="/saved" 
+            onClick={() => setSidebarOpen(false)}
+            className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700 rounded-lg font-medium"
+          >
+            <span className="text-xl">💾</span>
+            <span>Saved Companies</span>
           </Link>
           <Link 
             href="/history" 
@@ -329,6 +382,20 @@ Hey John, I saw that you're working on..."
                     />
                   </div>
                 )}
+
+                {/* Save Company Toggle */}
+                <div className="flex items-center gap-3 p-4 bg-slate-900 border border-slate-600 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="saveCompany"
+                    checked={saveCompany}
+                    onChange={(e) => setSaveCompany(e.target.checked)}
+                    className="w-5 h-5 rounded bg-slate-800 border-slate-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="saveCompany" className="text-sm font-medium text-white cursor-pointer">
+                    💾 Save this company for tracking
+                  </label>
+                </div>
                 
                 <button
                   type="submit"
