@@ -8,13 +8,40 @@ const groq = new Groq({
 })
 
 export async function POST(request: Request) {
-  const { prospectName, prospectTitle, company, industry, context, messageType, useLocal } = await request.json()
+  const { 
+    prospectName, 
+    prospectTitle, 
+    company, 
+    industry, 
+    context, 
+    messageType, 
+    messageHistory,
+    messageLength,
+    toneOfVoice,
+    targetResult,
+    sources,
+    useLocal 
+  } = await request.json()
 
-  const systemPrompt = `You write outreach for Tech-stack.io, a 200+ person DevOps services company.
+  const lengthInstructions = {
+    short: 'Keep messages 2-3 sentences maximum.',
+    medium: 'Keep messages 3-4 sentences.',
+    long: 'Keep messages 5-6 sentences with more detail.'
+  }
+
+  const toneInstructions = {
+    professional: 'Use professional, business-appropriate language.',
+    casual: 'Use casual, conversational language.',
+    friendly: 'Use warm, friendly language.',
+    direct: 'Use direct, no-nonsense language.',
+    enthusiastic: 'Use enthusiastic, energetic language.'
+  }
+
+  let systemPrompt = `You write outreach for Tech-stack.io, a 200+ person DevOps services company.
 
 STYLE RULES:
-- Keep messages 2-3 sentences maximum
-- Use casual, conversational tone
+- ${lengthInstructions[messageLength as keyof typeof lengthInstructions] || lengthInstructions.medium}
+- ${toneInstructions[toneOfVoice as keyof typeof toneInstructions] || toneInstructions.professional}
 - Problem-focused, not solution-focused
 - Reference specific business context
 - No generic pitches about services
@@ -25,21 +52,48 @@ APPROACH:
 - Reference specific timing (funding, expansion, acquisition)
 - Ask about their technical challenges
 - Never mention Tech-stack.io capabilities upfront
+${targetResult ? `- Aim to achieve this result: ${targetResult}` : ''}
+${sources ? `- Reference information from these sources when relevant: ${sources}` : ''}
 
 OUTPUT:
 Write only the message body. No subject line. No sign-off.`
 
-  const userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
+  let userPrompt = ''
+
+  if (messageType === 'Response' && messageHistory) {
+    systemPrompt = `You write responses for Tech-stack.io outreach conversations.
+
+STYLE RULES:
+- ${lengthInstructions[messageLength as keyof typeof lengthInstructions] || lengthInstructions.medium}
+- ${toneInstructions[toneOfVoice as keyof typeof toneInstructions] || toneInstructions.professional}
+- Address points raised in their message
+- Continue the conversation naturally
+- Be helpful and specific
+${targetResult ? `- Aim to achieve this result: ${targetResult}` : ''}
+
+OUTPUT:
+Write only the response message body. No subject line. No sign-off.`
+
+    userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
+Industry: ${industry}
+Context: ${context}
+
+CONVERSATION HISTORY:
+${messageHistory}
+
+Write a response to continue this conversation:`
+  } else {
+    userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
 Industry: ${industry}
 Context: ${context}
 Message Type: ${messageType}
 
 Write the message:`
+  }
 
   let generatedMessage
 
   if (useLocal) {
-    // Try local Ollama, fallback to Groq if not available
     try {
       const ollama = new Ollama({ host: 'http://localhost:11434' })
       const response = await ollama.chat({
@@ -51,7 +105,6 @@ Write the message:`
       })
       generatedMessage = response.message.content
     } catch (error) {
-      // Ollama not available, use Groq instead
       const completion = await groq.chat.completions.create({
         messages: [
           { role: 'system', content: systemPrompt },
@@ -63,7 +116,6 @@ Write the message:`
       generatedMessage = completion.choices[0].message.content
     }
   } else {
-    // Use Groq cloud
     const completion = await groq.chat.completions.create({
       messages: [
         { role: 'system', content: systemPrompt },
@@ -75,7 +127,6 @@ Write the message:`
     generatedMessage = completion.choices[0].message.content
   }
 
-  // Save to database
   await sql`
     INSERT INTO messages (prospect_name, prospect_title, company, industry, context, message_type, generated_message)
     VALUES (${prospectName}, ${prospectTitle}, ${company}, ${industry}, ${context}, ${messageType}, ${generatedMessage})

@@ -10,7 +10,12 @@ export default function Home() {
     company: '',
     industry: '',
     context: '',
-    messageType: 'LinkedIn Connection Request'
+    messageType: 'LinkedIn Connection',
+    messageHistory: '',
+    messageLength: 'medium',
+    toneOfVoice: 'professional',
+    targetResult: '',
+    sources: ''
   })
   
   const [useLocal, setUseLocal] = useState(false)
@@ -119,7 +124,7 @@ export default function Home() {
               >
                 <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition ${useLocal ? 'translate-x-5' : 'translate-x-1'}`} />
               </button>
-              <span className="text-xs font-medium text-slate-300">{useLocal ? 'Local' : 'Cloud'}</span>
+              <span className="text-xs font-medium text-white">{useLocal ? 'Local' : 'Cloud'}</span>
             </div>
           </div>
         </header>
@@ -137,11 +142,11 @@ export default function Home() {
               <form onSubmit={handleSubmit} className="p-4 lg:p-6 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-300 mb-2">Full Name</label>
+                    <label className="block text-sm font-semibold text-white mb-2">Full Name</label>
                     <input
                       type="text"
                       placeholder="John Smith"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-500 text-sm"
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white placeholder-slate-500 text-base"
                       value={formData.prospectName}
                       onChange={(e) => setFormData({...formData, prospectName: e.target.value})}
                       required
@@ -149,11 +154,11 @@ export default function Home() {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-semibold text-slate-300 mb-2">Job Title</label>
+                    <label className="block text-sm font-semibold text-white mb-2">Job Title</label>
                     <input
                       type="text"
                       placeholder="VP Engineering"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-500 text-sm"
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white placeholder-slate-500 text-base"
                       value={formData.prospectTitle}
                       onChange={(e) => setFormData({...formData, prospectTitle: e.target.value})}
                       required
@@ -163,11 +168,11 @@ export default function Home() {
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-300 mb-2">Company</label>
+                    <label className="block text-sm font-semibold text-white mb-2">Company</label>
                     <input
                       type="text"
                       placeholder="Acme Corp"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-500 text-sm"
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white placeholder-slate-500 text-base"
                       value={formData.company}
                       onChange={(e) => setFormData({...formData, company: e.target.value})}
                       required
@@ -175,11 +180,11 @@ export default function Home() {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-semibold text-slate-300 mb-2">Industry</label>
+                    <label className="block text-sm font-semibold text-white mb-2">Industry</label>
                     <input
                       type="text"
                       placeholder="Healthcare Tech"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-500 text-sm"
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white placeholder-slate-500 text-base"
                       value={formData.industry}
                       onChange={(e) => setFormData({...formData, industry: e.target.value})}
                       required
@@ -188,34 +193,105 @@ export default function Home() {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-semibold text-slate-300 mb-2">Business Context</label>
+                  <label className="block text-sm font-semibold text-white mb-2">Business Context</label>
                   <textarea
                     placeholder="Recent funding, expansion plans, technical challenges..."
-                    className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg h-24 lg:h-32 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-white placeholder-slate-500 text-sm"
+                    className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg h-24 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-white placeholder-slate-500 text-base"
                     value={formData.context}
                     onChange={(e) => setFormData({...formData, context: e.target.value})}
                     required
                   />
                 </div>
-                
+
                 <div>
-                  <label className="block text-sm font-semibold text-slate-300 mb-2">Message Type</label>
-                  <select
-                    className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white text-sm"
-                    value={formData.messageType}
-                    onChange={(e) => setFormData({...formData, messageType: e.target.value})}
-                  >
-                    <option>LinkedIn Connection Request</option>
-                    <option>Email Cold Outreach</option>
-                    <option>Conference Follow-up</option>
-                    <option>Discovery Call Request</option>
-                  </select>
+                  <label className="block text-sm font-semibold text-white mb-2">Target Result</label>
+                  <input
+                    type="text"
+                    placeholder="Schedule discovery call, get response, book meeting..."
+                    className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white placeholder-slate-500 text-base"
+                    value={formData.targetResult}
+                    onChange={(e) => setFormData({...formData, targetResult: e.target.value})}
+                  />
                 </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-white mb-2">Sources / Links (Optional)</label>
+                  <textarea
+                    placeholder="https://techcrunch.com/article, Company blog post, LinkedIn profile..."
+                    className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg h-20 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-white placeholder-slate-500 text-base"
+                    value={formData.sources}
+                    onChange={(e) => setFormData({...formData, sources: e.target.value})}
+                  />
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-white mb-2">Message Type</label>
+                    <select
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white text-base"
+                      value={formData.messageType}
+                      onChange={(e) => setFormData({...formData, messageType: e.target.value})}
+                    >
+                      <option>LinkedIn Connection</option>
+                      <option>Email Outreach</option>
+                      <option>Conference Follow-up</option>
+                      <option>Discovery Call</option>
+                      <option>Response</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-white mb-2">Message Length</label>
+                    <select
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white text-base"
+                      value={formData.messageLength}
+                      onChange={(e) => setFormData({...formData, messageLength: e.target.value})}
+                    >
+                      <option value="short">Short (2-3 sentences)</option>
+                      <option value="medium">Medium (3-4 sentences)</option>
+                      <option value="long">Long (5-6 sentences)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-white mb-2">Tone of Voice</label>
+                    <select
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white text-base"
+                      value={formData.toneOfVoice}
+                      onChange={(e) => setFormData({...formData, toneOfVoice: e.target.value})}
+                    >
+                      <option value="professional">Professional</option>
+                      <option value="casual">Casual</option>
+                      <option value="friendly">Friendly</option>
+                      <option value="direct">Direct</option>
+                      <option value="enthusiastic">Enthusiastic</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Conditional Message History Field */}
+                {formData.messageType === 'Response' && (
+                  <div className="border-t border-slate-700 pt-4 mt-4">
+                    <label className="block text-sm font-semibold text-white mb-2">Message History</label>
+                    <p className="text-xs text-slate-400 mb-2">Paste the conversation history you're responding to</p>
+                    <textarea
+                      placeholder="Their message:
+Hi Michael, thanks for reaching out...
+
+Your previous message:
+Hey John, I saw that you're working on..."
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg h-32 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-white placeholder-slate-500 text-base"
+                      value={formData.messageHistory}
+                      onChange={(e) => setFormData({...formData, messageHistory: e.target.value})}
+                      required
+                    />
+                  </div>
+                )}
                 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 lg:py-4 rounded-lg font-bold hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-600 disabled:to-slate-600 transition-all shadow-lg text-sm lg:text-base"
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-lg font-bold hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-600 disabled:to-slate-600 transition-all shadow-lg text-base"
                 >
                   {loading ? 'Generating...' : '✨ Generate Message'}
                 </button>
@@ -231,31 +307,31 @@ export default function Home() {
               
               <div className="p-4 lg:p-6">
                 {!message && !loading ? (
-                  <div className="flex flex-col items-center justify-center h-64 lg:h-96 text-center">
-                    <div className="w-16 h-16 lg:w-24 lg:h-24 bg-slate-700 rounded-full flex items-center justify-center mb-4 lg:mb-6">
-                      <span className="text-3xl lg:text-5xl">🎯</span>
+                  <div className="flex flex-col items-center justify-center h-96 text-center">
+                    <div className="w-24 h-24 bg-slate-700 rounded-full flex items-center justify-center mb-6">
+                      <span className="text-5xl">🎯</span>
                     </div>
-                    <p className="text-white text-base lg:text-lg font-semibold mb-2">Ready to Generate</p>
-                    <p className="text-slate-400 text-xs lg:text-sm">Fill in the prospect details</p>
+                    <p className="text-white text-lg font-semibold mb-2">Ready to Generate</p>
+                    <p className="text-slate-400 text-sm">Fill in the prospect details</p>
                   </div>
                 ) : loading ? (
-                  <div className="flex flex-col items-center justify-center h-64 lg:h-96">
-                    <div className="relative w-12 h-12 lg:w-16 lg:h-16">
+                  <div className="flex flex-col items-center justify-center h-96">
+                    <div className="relative w-16 h-16">
                       <div className="absolute inset-0 border-4 border-slate-700 rounded-full"></div>
                       <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
                     </div>
-                    <p className="text-white text-base lg:text-lg font-semibold mt-4 lg:mt-6">Generating...</p>
+                    <p className="text-white text-lg font-semibold mt-6">Generating...</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="bg-slate-900 border border-slate-600 rounded-lg p-4 lg:p-6">
-                      <p className="text-slate-100 leading-relaxed whitespace-pre-wrap text-sm lg:text-base">{message}</p>
+                    <div className="bg-slate-900 border border-slate-600 rounded-lg p-6 min-h-64">
+                      <p className="text-white leading-relaxed whitespace-pre-wrap text-base">{message}</p>
                     </div>
                     
-                    <div className="flex gap-2 lg:gap-3">
+                    <div className="flex gap-3">
                       <button
                         onClick={handleCopy}
-                        className={`flex-1 py-3 rounded-lg font-semibold transition-all text-sm lg:text-base ${
+                        className={`flex-1 py-3 rounded-lg font-semibold transition-all text-base ${
                           copied 
                             ? 'bg-green-500 text-white' 
                             : 'bg-blue-600 text-white hover:bg-blue-700'
@@ -265,7 +341,7 @@ export default function Home() {
                       </button>
                       <button
                         onClick={() => setMessage('')}
-                        className="px-4 lg:px-6 py-3 bg-slate-700 text-white rounded-lg hover:bg-slate-600 font-semibold transition text-sm lg:text-base"
+                        className="px-6 py-3 bg-slate-700 text-white rounded-lg hover:bg-slate-600 font-semibold transition text-base"
                       >
                         Clear
                       </button>
