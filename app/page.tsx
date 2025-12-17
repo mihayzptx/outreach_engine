@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 
-export default function Home() {
+function HomeContent() {
   const [formData, setFormData] = useState({
     prospectName: '',
     prospectTitle: '',
@@ -31,7 +31,6 @@ export default function Home() {
   const searchParams = useSearchParams()
 
   useEffect(() => {
-    // Pre-fill from URL params when coming from Saved Companies
     const company = searchParams.get('company')
     if (company) {
       setFormData({
@@ -65,7 +64,6 @@ export default function Home() {
     const data = await response.json()
     setMessage(data.message)
     
-    // Parse sources
     if (formData.sources.trim()) {
       const sourcesList = formData.sources
         .split('\n')
@@ -74,12 +72,10 @@ export default function Home() {
       setDisplayedSources(sourcesList)
     }
     
-    // Add web research sources if returned
     if (data.researchSources && data.researchSources.length > 0) {
       setDisplayedSources(prev => [...prev, ...data.researchSources])
     }
     
-    // Save company if checkbox is checked
     if (saveCompany) {
       try {
         await fetch('/api/companies/save', {
@@ -120,7 +116,6 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-slate-900">
-      {/* Mobile Overlay */}
       {sidebarOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-20 lg:hidden"
@@ -128,7 +123,6 @@ export default function Home() {
         />
       )}
 
-      {/* Sidebar */}
       <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-64 bg-slate-800 border-r border-slate-700 transition-transform duration-300 z-30 h-full flex flex-col`}>
         <div className="p-6 border-b border-slate-700">
           <div className="flex items-center gap-3">
@@ -177,9 +171,7 @@ export default function Home() {
         </nav>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 overflow-auto w-full">
-        {/* Top Bar */}
         <header className="bg-slate-800 border-b border-slate-700 px-4 lg:px-8 py-4 sticky top-0 z-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -221,10 +213,8 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Content */}
         <div className="p-4 lg:p-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-8 max-w-7xl mx-auto">
-            {/* Input Form */}
             <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl">
               <div className="border-b border-slate-700 px-4 lg:px-6 py-4">
                 <h3 className="text-lg font-bold text-white">Prospect Information</h3>
@@ -297,11 +287,10 @@ export default function Home() {
 
                 <div>
                   <label className="block text-sm font-semibold text-white mb-2">Sources / Links (Optional)</label>
-                  <p className="text-xs text-slate-400 mb-2">Add URLs or references (one per line). These will be displayed after generation.</p>
+                  <p className="text-xs text-slate-400 mb-2">Add URLs or references (one per line)</p>
                   <textarea
                     placeholder="https://techcrunch.com/article
-Company blog post about expansion
-LinkedIn profile insights"
+Company blog post about expansion"
                     className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg h-20 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-white placeholder-slate-500 text-base"
                     value={formData.sources}
                     onChange={(e) => setFormData({...formData, sources: e.target.value})}
@@ -336,7 +325,7 @@ LinkedIn profile insights"
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-white mb-2">Message Length</label>
+                    <label className="block text-sm font-semibold text-white mb-2">Length</label>
                     <select
                       className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white text-base"
                       value={formData.messageLength}
@@ -364,11 +353,10 @@ LinkedIn profile insights"
                   </div>
                 </div>
 
-                {/* Conditional Message History Field */}
                 {formData.messageType === 'Response' && (
                   <div className="border-t border-slate-700 pt-4 mt-4">
                     <label className="block text-sm font-semibold text-white mb-2">Message History</label>
-                    <p className="text-xs text-slate-400 mb-2">Paste the conversation history you're responding to</p>
+                    <p className="text-xs text-slate-400 mb-2">Paste the conversation history</p>
                     <textarea
                       placeholder="Their message:
 Hi Michael, thanks for reaching out...
@@ -383,7 +371,6 @@ Hey John, I saw that you're working on..."
                   </div>
                 )}
 
-                {/* Save Company Toggle */}
                 <div className="flex items-center gap-3 p-4 bg-slate-900 border border-slate-600 rounded-lg">
                   <input
                     type="checkbox"
@@ -407,7 +394,6 @@ Hey John, I saw that you're working on..."
               </form>
             </div>
 
-            {/* Output */}
             <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl">
               <div className="border-b border-slate-700 px-4 lg:px-6 py-4">
                 <h3 className="text-lg font-bold text-white">Generated Message</h3>
@@ -439,7 +425,6 @@ Hey John, I saw that you're working on..."
                       <p className="text-white leading-relaxed whitespace-pre-wrap text-base">{message}</p>
                     </div>
 
-                    {/* Display Sources */}
                     {displayedSources.length > 0 && (
                       <div className="bg-slate-900 border border-slate-600 rounded-lg p-4">
                         <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
@@ -497,5 +482,20 @@ Hey John, I saw that you're working on..."
         </div>
       </main>
     </div>
+  )
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen bg-slate-900 items-center justify-center">
+        <div className="relative w-16 h-16">
+          <div className="absolute inset-0 border-4 border-slate-700 rounded-full"></div>
+          <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
+        </div>
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   )
 }
