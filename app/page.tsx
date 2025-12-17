@@ -19,7 +19,9 @@ export default function Home() {
   })
   
   const [useLocal, setUseLocal] = useState(false)
+  const [useWebResearch, setUseWebResearch] = useState(false)
   const [message, setMessage] = useState('')
+  const [displayedSources, setDisplayedSources] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -28,15 +30,31 @@ export default function Home() {
     e.preventDefault()
     setLoading(true)
     setMessage('')
+    setDisplayedSources([])
     
     const response = await fetch('/api/outreach', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({...formData, useLocal})
+      body: JSON.stringify({...formData, useLocal, useWebResearch})
     })
     
     const data = await response.json()
     setMessage(data.message)
+    
+    // Parse sources
+    if (formData.sources.trim()) {
+      const sourcesList = formData.sources
+        .split('\n')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+      setDisplayedSources(sourcesList)
+    }
+    
+    // Add web research sources if returned
+    if (data.researchSources && data.researchSources.length > 0) {
+      setDisplayedSources(prev => [...prev, ...data.researchSources])
+    }
+    
     setLoading(false)
   }
 
@@ -44,6 +62,15 @@ export default function Home() {
     navigator.clipboard.writeText(message)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const isValidUrl = (str: string) => {
+    try {
+      new URL(str)
+      return true
+    } catch {
+      return false
+    }
   }
 
   return (
@@ -116,15 +143,27 @@ export default function Home() {
                 <p className="text-xs lg:text-sm text-slate-400 mt-1 hidden sm:block">Create personalized outreach messages</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 bg-slate-700 px-3 py-2 rounded-lg">
-              <span className="text-xs font-medium text-slate-300 hidden sm:inline">Model:</span>
-              <button
-                onClick={() => setUseLocal(!useLocal)}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${useLocal ? 'bg-green-500' : 'bg-blue-500'}`}
-              >
-                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition ${useLocal ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
-              <span className="text-xs font-medium text-white">{useLocal ? 'Local' : 'Cloud'}</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-slate-700 px-3 py-2 rounded-lg">
+                <span className="text-xs font-medium text-slate-300 hidden sm:inline">Model:</span>
+                <button
+                  onClick={() => setUseLocal(!useLocal)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${useLocal ? 'bg-green-500' : 'bg-blue-500'}`}
+                >
+                  <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition ${useLocal ? 'translate-x-5' : 'translate-x-1'}`} />
+                </button>
+                <span className="text-xs font-medium text-white">{useLocal ? 'Local' : 'Cloud'}</span>
+              </div>
+              <div className="flex items-center gap-2 bg-slate-700 px-3 py-2 rounded-lg">
+                <span className="text-xs font-medium text-slate-300 hidden sm:inline">Web Research:</span>
+                <button
+                  onClick={() => setUseWebResearch(!useWebResearch)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${useWebResearch ? 'bg-purple-500' : 'bg-gray-500'}`}
+                >
+                  <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition ${useWebResearch ? 'translate-x-5' : 'translate-x-1'}`} />
+                </button>
+                <span className="text-xs font-medium text-white">{useWebResearch ? 'On' : 'Off'}</span>
+              </div>
             </div>
           </div>
         </header>
@@ -204,6 +243,19 @@ export default function Home() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-semibold text-white mb-2">Sources / Links (Optional)</label>
+                  <p className="text-xs text-slate-400 mb-2">Add URLs or references (one per line). These will be displayed after generation.</p>
+                  <textarea
+                    placeholder="https://techcrunch.com/article
+Company blog post about expansion
+LinkedIn profile insights"
+                    className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg h-20 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-white placeholder-slate-500 text-base"
+                    value={formData.sources}
+                    onChange={(e) => setFormData({...formData, sources: e.target.value})}
+                  />
+                </div>
+
+                <div>
                   <label className="block text-sm font-semibold text-white mb-2">Target Result</label>
                   <input
                     type="text"
@@ -211,16 +263,6 @@ export default function Home() {
                     className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white placeholder-slate-500 text-base"
                     value={formData.targetResult}
                     onChange={(e) => setFormData({...formData, targetResult: e.target.value})}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-white mb-2">Sources / Links (Optional)</label>
-                  <textarea
-                    placeholder="https://techcrunch.com/article, Company blog post, LinkedIn profile..."
-                    className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg h-20 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-white placeholder-slate-500 text-base"
-                    value={formData.sources}
-                    onChange={(e) => setFormData({...formData, sources: e.target.value})}
                   />
                 </div>
                 
@@ -247,14 +289,14 @@ export default function Home() {
                       value={formData.messageLength}
                       onChange={(e) => setFormData({...formData, messageLength: e.target.value})}
                     >
-                      <option value="short">Short (2-3 sentences)</option>
-                      <option value="medium">Medium (3-4 sentences)</option>
-                      <option value="long">Long (5-6 sentences)</option>
+                      <option value="short">Short (2-3)</option>
+                      <option value="medium">Medium (3-4)</option>
+                      <option value="long">Long (5-6)</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-white mb-2">Tone of Voice</label>
+                    <label className="block text-sm font-semibold text-white mb-2">Tone</label>
                     <select
                       className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white text-base"
                       value={formData.toneOfVoice}
@@ -320,13 +362,44 @@ Hey John, I saw that you're working on..."
                       <div className="absolute inset-0 border-4 border-slate-700 rounded-full"></div>
                       <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
                     </div>
-                    <p className="text-white text-lg font-semibold mt-6">Generating...</p>
+                    <p className="text-white text-lg font-semibold mt-6">
+                      {useWebResearch ? 'Researching & Generating...' : 'Generating...'}
+                    </p>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div className="bg-slate-900 border border-slate-600 rounded-lg p-6 min-h-64">
                       <p className="text-white leading-relaxed whitespace-pre-wrap text-base">{message}</p>
                     </div>
+
+                    {/* Display Sources */}
+                    {displayedSources.length > 0 && (
+                      <div className="bg-slate-900 border border-slate-600 rounded-lg p-4">
+                        <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                          <span>🔗</span>
+                          <span>Sources Used</span>
+                        </h4>
+                        <div className="space-y-2">
+                          {displayedSources.map((source, index) => (
+                            <div key={index} className="flex items-start gap-2">
+                              <span className="text-slate-500 text-sm mt-0.5">{index + 1}.</span>
+                              {isValidUrl(source) ? (
+                                <a 
+                                  href={source} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-blue-400 hover:text-blue-300 text-sm underline break-all"
+                                >
+                                  {source}
+                                </a>
+                              ) : (
+                                <span className="text-slate-300 text-sm">{source}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     
                     <div className="flex gap-3">
                       <button
@@ -340,7 +413,10 @@ Hey John, I saw that you're working on..."
                         {copied ? '✓ Copied!' : '📋 Copy'}
                       </button>
                       <button
-                        onClick={() => setMessage('')}
+                        onClick={() => {
+                          setMessage('')
+                          setDisplayedSources([])
+                        }}
                         className="px-6 py-3 bg-slate-700 text-white rounded-lg hover:bg-slate-600 font-semibold transition text-base"
                       >
                         Clear
