@@ -10,6 +10,76 @@ const groq = new Groq({
 
 const tavilyClient = tavily({ apiKey: process.env.TAVILY_API_KEY })
 
+// Default settings
+const defaultSettings = {
+  temperature: 0.7,
+  maxTokens: 500,
+  topP: 0.9,
+  frequencyPenalty: 0.3,
+  presencePenalty: 0.3,
+  localModel: 'techstack-outreach',
+  cloudModel: 'llama-3.3-70b-versatile',
+  systemPromptBase: 'You write cold outreach for Tech-stack.io. Your messages are short, specific, and never generic.',
+  bannedPhrases: [
+    "I hope this finds you well",
+    "I wanted to reach out",
+    "I came across your profile",
+    "I noticed that",
+    "I'd love to connect",
+    "Pick your brain",
+    "Quick question",
+    "Not sure if you're the right person",
+    "I know you're busy",
+    "We help companies like yours",
+    "Synergy",
+    "Leverage",
+    "Circle back"
+  ],
+  goodOpeners: [
+    "Saw [company] just [specific event]...",
+    "[Relevant industry trend] is hitting [their sector]...",
+    "Your [specific project/initiative] caught my attention...",
+    "The [specific news] about [company] is interesting...",
+    "Congrats on [specific achievement]..."
+  ],
+  companyDescription: "Tech-stack.io is a 200+ person DevOps services company headquartered in Houston, TX.",
+  services: [
+    "Cloud Infrastructure Optimization (AWS, GCP, Azure)",
+    "CI/CD Implementation (Jenkins, GitLab CI, GitHub Actions)",
+    "Kubernetes & Container Orchestration",
+    "Team Augmentation (embedded senior DevOps engineers)",
+    "Platform Engineering",
+    "Infrastructure as Code (Terraform, Pulumi)",
+    "Observability & Monitoring (Datadog, Prometheus, Grafana)",
+    "Security & Compliance (SOC2, HIPAA, PCI-DSS)"
+  ],
+  idealCustomerSignals: [
+    "Just raised funding (Series A, B, C)",
+    "Post-acquisition integration",
+    "Rapid growth / scaling challenges",
+    "Cloud cost problems",
+    "Security audit coming",
+    "Platform team too small",
+    "Legacy modernization needs",
+    "DevOps hiring struggles"
+  ]
+}
+
+// Fetch settings from database
+async function getSettings() {
+  try {
+    const result = await sql`
+      SELECT settings_data FROM llm_settings WHERE id = 1
+    `
+    if (result.rows.length > 0 && result.rows[0].settings_data) {
+      return { ...defaultSettings, ...result.rows[0].settings_data }
+    }
+  } catch (error) {
+    console.log('Could not fetch settings, using defaults')
+  }
+  return defaultSettings
+}
+
 export async function POST(request: Request) {
   const { 
     prospectName, 
@@ -24,162 +94,280 @@ export async function POST(request: Request) {
     targetResult,
     sources,
     useLocal,
-    useWebResearch
+    useWebResearch,
+    adjustment
   } = await request.json()
 
-  console.log(useLocal ? '🏠 Using LOCAL Ollama model...' : '☁️ Using CLOUD Groq model...')
-  console.log(useWebResearch ? '🔍 Web research ENABLED' : '📝 Using provided context only')
+  console.log(useLocal ? '🏠 LOCAL' : '☁️ CLOUD', useWebResearch ? '+ 🔍 RESEARCH' : '')
 
-  const lengthInstructions = {
-    short: 'Keep messages 2-3 sentences maximum.',
-    medium: 'Keep messages 3-4 sentences.',
-    long: 'Keep messages 5-6 sentences with more detail.'
+  // Get settings from database
+  const settings = await getSettings()
+  console.log(`📊 Using model: ${useLocal ? settings.localModel : settings.cloudModel}, temp: ${settings.temperature}`)
+
+  const lengthInstructions: Record<string, string> = {
+    short: '2-3 sentences MAXIMUM. Under 200 characters ideal.',
+    medium: '3-4 sentences. 200-350 characters.',
+    long: '5-6 sentences. 350-500 characters.'
   }
 
-  const toneInstructions = {
-    professional: 'Use professional, business-appropriate language.',
-    casual: 'Use casual, conversational language.',
-    friendly: 'Use warm, friendly language.',
-    direct: 'Use direct, no-nonsense language.',
-    enthusiastic: 'Use enthusiastic, energetic language.'
+  const toneInstructions: Record<string, string> = {
+    professional: 'Business tone. Respectful. No slang.',
+    casual: 'Relaxed tone. Like texting a colleague.',
+    friendly: 'Warm and personable. Show genuine interest.',
+    direct: 'Get to the point fast. No fluff. Blunt.',
+    enthusiastic: 'High energy. Excited about their work.'
   }
 
+  // Web research
   let researchContext = ''
   let researchSources: string[] = []
 
-  // Perform web research if enabled
   if (useWebResearch) {
     try {
-      console.log('🔍 Searching web for:', company)
-      
       const searchQuery = `${company} ${industry} recent news funding expansion`
       const searchResponse = await tavilyClient.search(searchQuery, {
         maxResults: 5,
         searchDepth: 'basic',
-        includeAnswer: false
+        includeAnswer: false,
+        days: 30
       })
 
       if (searchResponse.results && searchResponse.results.length > 0) {
-        console.log(`✓ Found ${searchResponse.results.length} results`)
-        
-        // Extract relevant information
         const researchFindings = searchResponse.results
           .map((result: any) => `- ${result.title}: ${result.content}`)
           .join('\n')
         
-        researchContext = `\n\nWEB RESEARCH FINDINGS:\n${researchFindings}\n`
-        
-        // Store source URLs
-        researchSources = searchResponse.results
-          .map((result: any) => result.url)
-          .filter((url: string) => url)
-      } else {
-        console.log('⚠️ No search results found')
+        researchContext = `\n\nRECENT INTEL:\n${researchFindings}\n`
+        researchSources = searchResponse.results.map((result: any) => result.url).filter((url: string) => url)
       }
     } catch (error) {
-      console.error('❌ Web research error:', error)
-      researchContext = '\n\n[Web research was attempted but no additional context was found]'
+      console.error('Research error:', error)
     }
   }
 
-  let systemPrompt = `You write outreach for Tech-stack.io, a 200+ person DevOps services company.
+  // Build banned phrases list for prompt
+  const bannedPhrasesText = settings.bannedPhrases.map((p: string) => `- "${p}"`).join('\n')
+  
+  // Build good openers list
+  const goodOpenersText = settings.goodOpeners.map((o: string) => `- ${o}`).join('\n')
+  
+  // Build services list
+  const servicesText = settings.services.map((s: string) => `- ${s}`).join('\n')
 
-STYLE RULES:
-- ${lengthInstructions[messageLength as keyof typeof lengthInstructions] || lengthInstructions.medium}
-- ${toneInstructions[toneOfVoice as keyof typeof toneInstructions] || toneInstructions.professional}
-- Problem-focused, not solution-focused
-- Reference specific business context from the web research when available
-- No generic pitches about services
-- Position as peer, not vendor
+  // Build system prompt using settings
+  let systemPrompt = `${settings.systemPromptBase}
 
-APPROACH:
-- Lead with genuine interest in their work
-- Reference specific timing (funding, expansion, acquisition) from research
-- Ask about their technical challenges
-- Never mention Tech-stack.io capabilities upfront
-${targetResult ? `- Aim to achieve this result: ${targetResult}` : ''}
-${sources ? `- Reference information from these sources when relevant: ${sources}` : ''}
+## ABOUT THE COMPANY
+${settings.companyDescription}
 
-OUTPUT:
-Write only the message body. No subject line. No sign-off.`
+## SERVICES (know these but don't list them in messages):
+${servicesText}
+
+## IDEAL CUSTOMER SIGNALS:
+${settings.idealCustomerSignals.map((s: string) => `- ${s}`).join('\n')}
+
+## CRITICAL RULES - FOLLOW EXACTLY:
+1. ${lengthInstructions[messageLength] || lengthInstructions.medium}
+2. ${toneInstructions[toneOfVoice] || toneInstructions.professional}
+3. Lead with THEIR specific situation, not who you are
+4. Reference ONE specific detail from their context
+5. End with soft CTA or question, never hard sell
+6. Position as peer/expert, not vendor begging for time
+7. NEVER start with "I"
+
+## BANNED PHRASES - NEVER USE:
+${bannedPhrasesText}
+
+## GOOD OPENER PATTERNS:
+${goodOpenersText}
+
+## STRUCTURE:
+1. Hook: Specific observation about them (1 sentence)
+2. Bridge: Why it matters to them (1 sentence)  
+3. CTA: Soft question or offer (1 sentence)
+
+${targetResult ? `## TARGET OUTCOME: ${targetResult}` : ''}
+${sources ? `## REFERENCE SOURCES: ${sources}` : ''}
+
+OUTPUT: Message body only. No subject line. No signature. No "Best," or "Thanks,"`
 
   let userPrompt = ''
 
   if (messageType === 'Response' && messageHistory) {
-    systemPrompt = `You write responses for Tech-stack.io outreach conversations.
+    systemPrompt = `${settings.systemPromptBase}
 
-STYLE RULES:
-- ${lengthInstructions[messageLength as keyof typeof lengthInstructions] || lengthInstructions.medium}
-- ${toneInstructions[toneOfVoice as keyof typeof toneInstructions] || toneInstructions.professional}
-- Address points raised in their message
-- Continue the conversation naturally
-- Be helpful and specific
-${targetResult ? `- Aim to achieve this result: ${targetResult}` : ''}
+You write follow-up responses for outreach conversations.
 
-OUTPUT:
-Write only the response message body. No subject line. No sign-off.`
+## RULES:
+1. ${lengthInstructions[messageLength] || lengthInstructions.medium}
+2. ${toneInstructions[toneOfVoice] || toneInstructions.professional}
+3. Address their specific points directly
+4. Add value in your response
+5. Move conversation forward with clear next step
+6. Match their energy level
+
+## BANNED PHRASES:
+${bannedPhrasesText}
+
+${targetResult ? `## TARGET OUTCOME: ${targetResult}` : ''}
+
+OUTPUT: Response only. No signature.`
 
     userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
 Industry: ${industry}
 Context: ${context}${researchContext}
 
-CONVERSATION HISTORY:
+CONVERSATION:
 ${messageHistory}
 
-Write a response to continue this conversation:`
+Write response:`
   } else {
     userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
 Industry: ${industry}
 Context: ${context}${researchContext}
-Message Type: ${messageType}
+Type: ${messageType}
 
-Write the message:`
+${adjustment ? `ADJUSTMENT: Make this ${adjustment}` : ''}
+
+Write message:`
   }
 
-  let generatedMessage
+  let generatedMessage = ''
 
-  if (useLocal) {
-    try {
-      const ollama = new Ollama({ host: 'http://localhost:11434' })
-      const response = await ollama.chat({
-        model: 'llama3.1:8b',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-      })
-      generatedMessage = response.message.content
-    } catch (error) {
-      console.log('⚠️ Local model failed, falling back to cloud...')
+  try {
+    if (useLocal) {
+      try {
+        const ollama = new Ollama({ host: 'http://localhost:11434' })
+        const response = await ollama.chat({
+          model: settings.localModel,
+          options: {
+            temperature: settings.temperature,
+            top_p: settings.topP,
+            num_predict: settings.maxTokens
+          },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+        })
+        generatedMessage = response.message.content
+      } catch (error) {
+        console.log('Local failed, trying fallback model...')
+        try {
+          const ollama = new Ollama({ host: 'http://localhost:11434' })
+          const response = await ollama.chat({
+            model: 'llama3.1:8b',
+            options: {
+              temperature: settings.temperature,
+              top_p: settings.topP,
+              num_predict: settings.maxTokens
+            },
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+          })
+          generatedMessage = response.message.content
+        } catch (e) {
+          console.log('Ollama failed, using cloud...')
+          const completion = await groq.chat.completions.create({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            model: settings.cloudModel,
+            temperature: settings.temperature,
+            max_tokens: settings.maxTokens,
+            top_p: settings.topP,
+            frequency_penalty: settings.frequencyPenalty,
+            presence_penalty: settings.presencePenalty,
+          })
+          generatedMessage = completion.choices[0].message.content || ''
+        }
+      }
+    } else {
       const completion = await groq.chat.completions.create({
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        model: 'llama-3.3-70b-versatile',
-        temperature: 0.7,
+        model: settings.cloudModel,
+        temperature: settings.temperature,
+        max_tokens: settings.maxTokens,
+        top_p: settings.topP,
+        frequency_penalty: settings.frequencyPenalty,
+        presence_penalty: settings.presencePenalty,
       })
-      generatedMessage = completion.choices[0].message.content
+      generatedMessage = completion.choices[0].message.content || ''
     }
-  } else {
-    const completion = await groq.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.7,
-    })
-    generatedMessage = completion.choices[0].message.content
+  } catch (error) {
+    console.error('Generation error:', error)
+    generatedMessage = 'Error generating message. Please try again.'
   }
 
-  await sql`
-    INSERT INTO messages (prospect_name, prospect_title, company, industry, context, message_type, generated_message)
-    VALUES (${prospectName}, ${prospectTitle}, ${company}, ${industry}, ${context}, ${messageType}, ${generatedMessage})
-  `
+  // Clean up output
+  generatedMessage = generatedMessage
+    .replace(/^(Subject|Subject Line|RE|Re):.*\n?/gi, '')
+    .replace(/^(Hi|Hello|Hey|Dear)\s+\[?Name\]?,?\s*/gi, '')
+    .replace(/\n*(Best|Thanks|Regards|Cheers|Best regards|Kind regards),?\n*.*/gi, '')
+    .replace(/\[Your Name\]|\[Name\]|\[Signature\]/gi, '')
+    .trim()
+
+  // Quality scoring
+  const charCount = generatedMessage.length
+  const wordCount = generatedMessage.split(/\s+/).length
+  const startsWithI = generatedMessage.trim().startsWith('I ') || generatedMessage.trim().startsWith("I'")
+  
+  // Check for banned phrases dynamically
+  const bannedRegex = new RegExp(
+    settings.bannedPhrases.map((p: string) => p.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
+    'i'
+  )
+  const hasBannedPhrases = bannedRegex.test(generatedMessage)
+  
+  const hasSpecificReference = generatedMessage.toLowerCase().includes(company.toLowerCase()) || 
+                               generatedMessage.toLowerCase().includes(prospectName.split(' ')[0].toLowerCase())
+  const endsWithQuestion = generatedMessage.trim().endsWith('?')
+  
+  let qualityScore = 100
+  if (startsWithI) qualityScore -= 20
+  if (hasBannedPhrases) qualityScore -= 25
+  if (charCount > 500) qualityScore -= 10
+  if (charCount < 50) qualityScore -= 20
+  if (wordCount < 10) qualityScore -= 15
+  if (!hasSpecificReference) qualityScore -= 10
+  if (!endsWithQuestion && messageType === 'LinkedIn Connection') qualityScore -= 5
+
+  // Ensure score doesn't go below 0
+  qualityScore = Math.max(0, qualityScore)
+
+  const warnings: string[] = []
+  if (startsWithI) warnings.push('Starts with "I" - consider rewording')
+  if (hasBannedPhrases) warnings.push('Contains generic/banned phrases')
+  if (charCount > 300 && messageType === 'LinkedIn Connection') warnings.push('Over LinkedIn 300 char limit')
+  if (!hasSpecificReference) warnings.push('Missing specific reference to prospect/company')
+  if (!endsWithQuestion) warnings.push('Consider ending with a question')
+
+  // Save to database
+  try {
+    await sql`
+      INSERT INTO messages (prospect_name, prospect_title, company, industry, context, message_type, generated_message)
+      VALUES (${prospectName}, ${prospectTitle}, ${company}, ${industry}, ${context}, ${messageType}, ${generatedMessage})
+    `
+  } catch (error) {
+    console.error('DB error:', error)
+  }
 
   return NextResponse.json({ 
     message: generatedMessage,
-    researchSources
+    researchSources,
+    metrics: {
+      charCount,
+      wordCount,
+      qualityScore,
+      warnings
+    },
+    modelUsed: useLocal ? settings.localModel : settings.cloudModel,
+    temperature: settings.temperature
   })
 }
