@@ -62,6 +62,22 @@ const defaultSettings = {
     "Platform team too small",
     "Legacy modernization needs",
     "DevOps hiring struggles"
+  ],
+  abmExamples: [
+    `Brittany,
+It's Michael, managing partner at Techstack. Congrats on the Chicago Titan 100. COO for six months and already being recognized alongside the region's top executives.
+Eight functions. Gen-3 succession. Tariff exposure on Reynosa. That's a lot to navigate while building your leadership profile externally. Well deserved recognition.
+I know the holidays are busy, especially with Revcor's Salvation Army work and Angel Tree coming up. Enjoy the season. Wishing you and REVCOR team Merry Christmas!`,
+    `Alex,
+Been following Hoffer for a while now. Caught John Strubulis's piece in Sustainable Packaging News on circularity and flexible packaging.
+Love what you all are building over there. Most sustainability talk in plastics feels defensive. This was different. Real engineering thinking about how caps and spouts fit into a closed loop system. Small components, big impact.
+Hope you get some real time off with family this Christmas.`,
+    `Gary,
+Five wins at the INCA Awards. That's a statement.
+K Systems and Weber under one roof less than a year and already taking whole categories. Not easy to pull off.
+The judges called the Nottingham project "a beautifully designed building and an expertly installed system." That's not participation trophy talk. That's real validation.
+First full year after the acquisition and you're stacking the right proof points. Strong way to finish 2025.
+Hope you and the team get a chance to switch off over Christmas. Well deserved.`
   ]
 }
 
@@ -225,6 +241,11 @@ ${messageHistory}
 Write response:`
   } else if (messageType === 'ABM') {
     // ABM: Soft touch, recognition-focused messages
+    // Build examples from settings
+    const abmExamplesText = settings.abmExamples && settings.abmExamples.length > 0
+      ? settings.abmExamples.map((ex: string, i: number) => `Example ${i + 1}:\n"${ex}"`).join('\n\n')
+      : ''
+    
     systemPrompt = `${settings.systemPromptBase}
 
 You write warm, personalized ABM (Account-Based Marketing) messages. These are soft-touch messages focused on RECOGNITION and RELATIONSHIP BUILDING. NO SALES PITCH.
@@ -260,25 +281,7 @@ ${bannedPhrasesText}
 4. Personal Touch: Genuine observation or connection (1 sentence)
 5. Warm Close: Well-wishes, seasonal greeting, or simple acknowledgment (1 sentence)
 
-## EXAMPLE TONE (study these):
-
-Example 1:
-"Brittany,
-Congrats on the Chicago Titan 100. COO for six months and already being recognized alongside the region's top executives.
-Eight functions. Gen-3 succession. That's a lot to navigate while building your leadership profile externally. Well deserved recognition.
-Enjoy the season. Wishing you and the team a Merry Christmas!"
-
-Example 2:
-"Alex,
-Caught John's piece in Sustainable Packaging News on circularity and flexible packaging.
-Love what you all are building. Most sustainability talk in plastics feels defensive. This was different. Real engineering thinking about how caps and spouts fit into a closed loop system.
-Hope you get some real time off with family this Christmas."
-
-Example 3:
-"Gary,
-Five wins at the INCA Awards. That's a statement.
-First full year after the acquisition and you're stacking the right proof points. Strong way to finish.
-Hope you and the team get a chance to switch off over the holidays. Well deserved."
+${abmExamplesText ? `## EXAMPLE TONE (study these carefully and match this style):\n\n${abmExamplesText}` : ''}
 
 ${targetResult ? `## SOFT TOUCH GOAL: ${targetResult}` : ''}
 ${sources ? `## REFERENCE SOURCES: ${sources}` : ''}

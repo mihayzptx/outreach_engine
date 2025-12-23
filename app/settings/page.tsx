@@ -17,6 +17,7 @@ interface LLMSettings {
   companyDescription: string
   services: string[]
   idealCustomerSignals: string[]
+  abmExamples: string[]
 }
 
 const defaultSettings: LLMSettings = {
@@ -70,24 +71,43 @@ const defaultSettings: LLMSettings = {
     "Platform team too small",
     "Legacy modernization needs",
     "DevOps hiring struggles"
+  ],
+  abmExamples: [
+    `Brittany,
+It's Michael, managing partner at Techstack. Congrats on the Chicago Titan 100. COO for six months and already being recognized alongside the region's top executives.
+Eight functions. Gen-3 succession. Tariff exposure on Reynosa. That's a lot to navigate while building your leadership profile externally. Well deserved recognition.
+I know the holidays are busy, especially with Revcor's Salvation Army work and Angel Tree coming up. Enjoy the season. Wishing you and REVCOR team Merry Christmas!`,
+    `Alex,
+Been following Hoffer for a while now. Caught John Strubulis's piece in Sustainable Packaging News on circularity and flexible packaging.
+Love what you all are building over there. Most sustainability talk in plastics feels defensive. This was different. Real engineering thinking about how caps and spouts fit into a closed loop system. Small components, big impact.
+Hope you get some real time off with family this Christmas.`,
+    `Gary,
+Five wins at the INCA Awards. That's a statement.
+K Systems and Weber under one roof less than a year and already taking whole categories. Not easy to pull off.
+The judges called the Nottingham project "a beautifully designed building and an expertly installed system." That's not participation trophy talk. That's real validation.
+First full year after the acquisition and you're stacking the right proof points. Strong way to finish 2025.
+Hope you and the team get a chance to switch off over Christmas. Well deserved.`
   ]
 }
 
 export default function Settings() {
   const [settings, setSettings] = useState<LLMSettings>(defaultSettings)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples'>('model')
+  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'abm'>('model')
   const [saved, setSaved] = useState(false)
   const [newBannedPhrase, setNewBannedPhrase] = useState('')
   const [newOpener, setNewOpener] = useState('')
   const [newService, setNewService] = useState('')
   const [newSignal, setNewSignal] = useState('')
+  const [newAbmExample, setNewAbmExample] = useState('')
+  const [editingAbmIndex, setEditingAbmIndex] = useState<number | null>(null)
 
   useEffect(() => {
-    // Load settings from localStorage
+    // Load settings from localStorage, merge with defaults for new properties
     const savedSettings = localStorage.getItem('llm-settings')
     if (savedSettings) {
-      setSettings(JSON.parse(savedSettings))
+      const parsed = JSON.parse(savedSettings)
+      setSettings({ ...defaultSettings, ...parsed })
     }
   }, [])
 
@@ -148,6 +168,23 @@ export default function Settings() {
 
   const removeSignal = (index: number) => {
     setSettings({...settings, idealCustomerSignals: settings.idealCustomerSignals.filter((_, i) => i !== index)})
+  }
+
+  const addAbmExample = () => {
+    if (newAbmExample.trim()) {
+      setSettings({...settings, abmExamples: [...settings.abmExamples, newAbmExample.trim()]})
+      setNewAbmExample('')
+    }
+  }
+
+  const removeAbmExample = (index: number) => {
+    setSettings({...settings, abmExamples: settings.abmExamples.filter((_, i) => i !== index)})
+  }
+
+  const updateAbmExample = (index: number, value: string) => {
+    const updated = [...settings.abmExamples]
+    updated[index] = value
+    setSettings({...settings, abmExamples: updated})
   }
 
   return (
@@ -235,17 +272,18 @@ export default function Settings() {
 
         {/* Tabs */}
         <div className="border-b border-slate-700/50 px-4 lg:px-8">
-          <div className="flex gap-1">
+          <div className="flex gap-1 overflow-x-auto">
             {[
               { id: 'model', label: '🤖 Model', desc: 'LLM Parameters' },
               { id: 'prompts', label: '📝 Prompts', desc: 'System Prompts' },
               { id: 'company', label: '🏢 Company', desc: 'Tech-stack Info' },
+              { id: 'abm', label: '💜 ABM', desc: 'Soft Touch Examples' },
               { id: 'examples', label: '💡 Examples', desc: 'Good/Bad Patterns' }
             ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-6 py-4 font-medium text-sm transition-all border-b-2 ${
+                className={`px-6 py-4 font-medium text-sm transition-all border-b-2 whitespace-nowrap ${
                   activeTab === tab.id 
                     ? 'text-orange-400 border-orange-400' 
                     : 'text-slate-400 border-transparent hover:text-white'
@@ -609,6 +647,116 @@ export default function Settings() {
                         </button>
                       </span>
                     ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ABM Tab */}
+            {activeTab === 'abm' && (
+              <>
+                <div className="bg-purple-900/20 border border-purple-700/30 rounded-2xl p-6">
+                  <h3 className="text-lg font-bold text-purple-400 mb-2">ABM Soft Touch Examples</h3>
+                  <p className="text-sm text-slate-300">These examples teach the AI how to write warm, personalized ABM messages. Recognition-focused, no sales pitch, genuine tone.</p>
+                </div>
+
+                {/* Existing ABM Examples */}
+                <div className="space-y-4">
+                  {(settings.abmExamples || []).map((example, index) => (
+                    <div key={index} className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs font-semibold text-purple-400">EXAMPLE {index + 1}</span>
+                        <div className="flex gap-2">
+                          {editingAbmIndex === index ? (
+                            <button
+                              onClick={() => setEditingAbmIndex(null)}
+                              className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs hover:bg-green-500"
+                            >
+                              ✓ Done
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setEditingAbmIndex(index)}
+                              className="px-3 py-1 bg-slate-700 text-white rounded-lg text-xs hover:bg-slate-600"
+                            >
+                              ✏️ Edit
+                            </button>
+                          )}
+                          <button
+                            onClick={() => removeAbmExample(index)}
+                            className="px-3 py-1 bg-red-900/50 text-red-400 rounded-lg text-xs hover:bg-red-900"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {editingAbmIndex === index ? (
+                        <textarea
+                          className="w-full px-4 py-3 bg-slate-900/50 border border-purple-600/50 rounded-xl text-white h-48 resize-none text-sm"
+                          value={example}
+                          onChange={(e) => updateAbmExample(index, e.target.value)}
+                        />
+                      ) : (
+                        <div className="p-4 bg-purple-900/20 border border-purple-700/30 rounded-xl">
+                          <p className="text-white text-sm whitespace-pre-wrap">{example}</p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add New ABM Example */}
+                <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
+                  <h3 className="text-lg font-bold text-white mb-4">Add New ABM Example</h3>
+                  <p className="text-sm text-slate-400 mb-4">Paste a real message that worked well. The AI learns from these.</p>
+                  
+                  <textarea
+                    className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600/50 rounded-xl text-white h-40 resize-none text-sm mb-4"
+                    placeholder="Paste your best ABM message here...
+
+Example format:
+[First Name],
+[Recognition/observation about their work]
+[Why it matters / your insight]
+[Warm closing / seasonal greeting]"
+                    value={newAbmExample}
+                    onChange={(e) => setNewAbmExample(e.target.value)}
+                  />
+                  
+                  <button
+                    onClick={addAbmExample}
+                    disabled={!newAbmExample.trim()}
+                    className="px-6 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-500 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    + Add Example
+                  </button>
+                </div>
+
+                {/* Tips */}
+                <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
+                  <h3 className="text-lg font-bold text-white mb-4">What Makes a Good ABM Example?</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-green-900/20 border border-green-700/30 rounded-xl">
+                      <div className="text-green-400 font-semibold mb-2">✓ Do</div>
+                      <ul className="text-sm text-slate-300 space-y-1">
+                        <li>• Start with first name only</li>
+                        <li>• Reference specific achievements</li>
+                        <li>• Show genuine insight</li>
+                        <li>• End with warm wishes</li>
+                        <li>• Keep it personal</li>
+                      </ul>
+                    </div>
+                    <div className="p-4 bg-red-900/20 border border-red-700/30 rounded-xl">
+                      <div className="text-red-400 font-semibold mb-2">✗ Don't</div>
+                      <ul className="text-sm text-slate-300 space-y-1">
+                        <li>• Include sales pitch</li>
+                        <li>• Ask for meetings</li>
+                        <li>• Use "I'd love to connect"</li>
+                        <li>• Be vague or generic</li>
+                        <li>• Start with "I"</li>
+                      </ul>
+                    </div>
                   </div>
                 </div>
               </>
