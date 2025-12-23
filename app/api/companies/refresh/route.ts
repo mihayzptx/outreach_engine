@@ -36,7 +36,9 @@ export async function POST(request: Request) {
     new_signals = ${JSON.stringify(signals)},
     signal_links = ${JSON.stringify(links)},
     has_new_signals = ${hasNewSignals},
-    last_scanned_at = NOW()
+    last_scanned_at = NOW(),
+    last_signal_date = ${hasNewSignals ? new Date().toISOString() : null},
+    signal_count = ${signals.length}
   WHERE id = ${company_id}
     `
 

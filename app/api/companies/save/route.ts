@@ -8,7 +8,11 @@ export async function POST(request: Request) {
     prospect_name, 
     prospect_title, 
     context,
-    message_type
+    message_type,
+    country,
+    labels,
+    notes,
+    website
   } = await request.json()
 
   try {
@@ -19,7 +23,11 @@ export async function POST(request: Request) {
         last_prospect_name, 
         last_prospect_title, 
         last_context,
-        last_message_type
+        last_message_type,
+        country,
+        labels,
+        notes,
+        website
       )
       VALUES (
         ${company_name}, 
@@ -27,15 +35,20 @@ export async function POST(request: Request) {
         ${prospect_name}, 
         ${prospect_title}, 
         ${context},
-        ${message_type}
+        ${message_type},
+        ${country || null},
+        ${labels || []},
+        ${notes || null},
+        ${website || null}
       )
       ON CONFLICT (company_name) 
       DO UPDATE SET 
-        industry = ${industry},
+        industry = COALESCE(${industry}, saved_companies.industry),
         last_prospect_name = ${prospect_name},
         last_prospect_title = ${prospect_title},
         last_context = ${context},
         last_message_type = ${message_type},
+        country = COALESCE(${country || null}, saved_companies.country),
         updated_at = NOW()
     `
     
