@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import UserNav from '@/components/UserNav'
+
 
 export default function Bulk() {
   const [prospects, setProspects] = useState<any[]>([])
@@ -180,6 +182,9 @@ export default function Bulk() {
             <span className="text-xl">⚙️</span>
             <span>Settings</span>
           </Link>
+          <div className="p-4 border-t border-slate-700/50">
+  <UserNav />
+</div>
         </nav>
 
         <div className="p-4 border-t border-slate-700/50">
