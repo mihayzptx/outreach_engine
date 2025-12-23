@@ -284,6 +284,43 @@ function HomeContent() {
       }
       
       if (saveCompany) {
+        // Extract company info from WEB RESEARCH only (not user input)
+        let extractedInfo: any = {}
+        let gradingData: any = {}
+        let leadGrade = null
+        let leadScore = null
+        let researchLinksData: any[] = []
+        
+        // Use only web research results for extraction
+        const webResearchText = data.researchContext || ''
+        const webResearchLinks = data.researchSources || []
+        
+        // Only extract if we have web research data
+        if (webResearchText && webResearchLinks.length > 0) {
+          try {
+            const extractResponse = await fetch('/api/research/extract', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                researchText: webResearchText,
+                companyName: formData.company,
+                prospectTitle: formData.prospectTitle,
+                sources: webResearchLinks
+              })
+            })
+            const extractData = await extractResponse.json()
+            if (extractData.success) {
+              extractedInfo = extractData.extractedInfo || {}
+              gradingData = extractData.grading?.data || {}
+              leadGrade = extractData.grading?.grade
+              leadScore = extractData.grading?.score
+              researchLinksData = extractData.researchLinks || []
+            }
+          } catch (err) {
+            console.error('Extract error:', err)
+          }
+        }
+        
         await fetch('/api/companies/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -292,11 +329,29 @@ function HomeContent() {
             industry: getEffectiveIndustry(),
             prospect_name: formData.prospectName,
             prospect_title: formData.prospectTitle,
+            // Save USER context only (not research)
             context: formData.context,
-            message_type: formData.messageType
+            message_type: formData.messageType,
+            // Extracted company info from WEB RESEARCH
+            employee_count: extractedInfo.employee_count || null,
+            revenue_range: extractedInfo.revenue_range || null,
+            funding_stage: extractedInfo.funding_stage || null,
+            funding_amount: extractedInfo.funding_amount || null,
+            founded_year: extractedInfo.founded_year || null,
+            headquarters: extractedInfo.headquarters || null,
+            country: extractedInfo.country || null,
+            website: extractedInfo.website || null,
+            is_hiring: extractedInfo.is_hiring || false,
+            buyer_intent: extractedInfo.buyer_intent || false,
+            // Grading
+            grading_data: Object.keys(gradingData).length > 0 ? gradingData : null,
+            lead_grade: leadGrade,
+            lead_score: leadScore,
+            // Research links from web search
+            research_links_data: researchLinksData.length > 0 ? researchLinksData : null
           })
         })
-        showToast('Company saved for tracking', 'success')
+        showToast(webResearchLinks.length > 0 ? 'Company saved with research data' : 'Company saved', 'success')
         
         // Refresh saved companies list
         const response = await fetch('/api/companies')

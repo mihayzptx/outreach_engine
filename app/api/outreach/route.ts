@@ -142,21 +142,47 @@ export async function POST(request: Request) {
 
   if (useWebResearch) {
     try {
-      const searchQuery = `${company} ${industry} recent news funding expansion`
-      const searchResponse = await tavilyClient.search(searchQuery, {
-        maxResults: 5,
-        searchDepth: 'basic',
-        includeAnswer: false,
-        days: 30
+      // Search for company info with multiple queries
+      const queries = [
+        `${company} company funding revenue employees`,
+        `${company} ${industry} news 2024`,
+        `${company} headquarters founded CEO`
+      ]
+      
+      let allResults: any[] = []
+      
+      for (const query of queries) {
+        try {
+          const searchResponse = await tavilyClient.search(query, {
+            maxResults: 3,
+            searchDepth: 'advanced',
+            includeAnswer: false,
+            days: 60
+          })
+          if (searchResponse.results) {
+            allResults = [...allResults, ...searchResponse.results]
+          }
+        } catch (e) {
+          console.error('Search query failed:', query, e)
+        }
+      }
+      
+      // Deduplicate by URL
+      const seenUrls = new Set<string>()
+      const uniqueResults = allResults.filter(r => {
+        if (seenUrls.has(r.url)) return false
+        seenUrls.add(r.url)
+        return true
       })
 
-      if (searchResponse.results && searchResponse.results.length > 0) {
-        const researchFindings = searchResponse.results
+      if (uniqueResults.length > 0) {
+        const researchFindings = uniqueResults
+          .slice(0, 8)
           .map((result: any) => `- ${result.title}: ${result.content}`)
           .join('\n')
         
         researchContext = `\n\nRECENT INTEL:\n${researchFindings}\n`
-        researchSources = searchResponse.results.map((result: any) => result.url).filter((url: string) => url)
+        researchSources = uniqueResults.slice(0, 8).map((result: any) => result.url).filter((url: string) => url)
       }
     } catch (error) {
       console.error('Research error:', error)
@@ -451,6 +477,7 @@ Write message:`
   return NextResponse.json({ 
     message: generatedMessage,
     researchSources,
+    researchContext,
     metrics: {
       charCount,
       wordCount,
