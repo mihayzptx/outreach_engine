@@ -1,8 +1,62 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, Suspense, useRef } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+
+// Industry options
+const INDUSTRIES = [
+  'SaaS / Software',
+  'FinTech',
+  'Healthcare Tech',
+  'E-commerce',
+  'Manufacturing',
+  'Logistics / Supply Chain',
+  'Real Estate Tech',
+  'EdTech',
+  'Cybersecurity',
+  'AI / Machine Learning',
+  'IoT / Hardware',
+  'Media / Entertainment',
+  'Retail',
+  'Energy / CleanTech',
+  'Legal Tech',
+  'HR Tech',
+  'Other'
+]
+
+// Target result options
+const TARGET_RESULTS = [
+  'Schedule discovery call',
+  'Get a reply / start conversation',
+  'Book a demo',
+  'Request introduction',
+  'Reconnect after event',
+  'Share relevant content',
+  'Explore partnership',
+  'Other'
+]
+
+// ABM-specific target results (soft touch)
+const ABM_TARGET_RESULTS = [
+  'Recognition only (no ask)',
+  'Soft engagement',
+  'Content sharing',
+  'Event invitation',
+  'Seasonal greeting',
+  'Congratulate achievement',
+  'Other'
+]
+
+interface SavedCompany {
+  id: number
+  company_name: string
+  industry: string
+  last_prospect_name: string
+  last_prospect_title: string
+  last_context: string
+  last_message_type: string
+}
 
 function HomeContent() {
   const [formData, setFormData] = useState({
@@ -10,16 +64,19 @@ function HomeContent() {
     prospectTitle: '',
     company: '',
     industry: '',
+    industryOther: '',
     context: '',
     messageType: 'LinkedIn Connection',
     messageHistory: '',
     messageLength: 'medium',
     toneOfVoice: 'professional',
     targetResult: '',
+    targetResultOther: '',
     sources: ''
   })
   
   const [useLocal, setUseLocal] = useState(false)
+  const [checkingModel, setCheckingModel] = useState(false)
   const [useWebResearch, setUseWebResearch] = useState(false)
   const [saveCompany, setSaveCompany] = useState(false)
   const [message, setMessage] = useState('')
@@ -30,36 +87,159 @@ function HomeContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [metrics, setMetrics] = useState<any>(null)
   const [toast, setToast] = useState<{message: string, type: 'success' | 'warning' | 'error'} | null>(null)
+  
+  // Saved companies for suggestions
+  const [savedCompanies, setSavedCompanies] = useState<SavedCompany[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [filteredSuggestions, setFilteredSuggestions] = useState<SavedCompany[]>([])
+  const suggestionRef = useRef<HTMLDivElement>(null)
 
   const searchParams = useSearchParams()
 
+  // Load saved companies on mount
+  useEffect(() => {
+    const fetchSavedCompanies = async () => {
+      try {
+        const response = await fetch('/api/companies')
+        const data = await response.json()
+        setSavedCompanies(data.companies || [])
+      } catch (error) {
+        console.error('Error fetching saved companies:', error)
+      }
+    }
+    fetchSavedCompanies()
+  }, [])
+
+  // Handle URL params prefill
   useEffect(() => {
     const company = searchParams.get('company')
     if (company) {
+      const industry = searchParams.get('industry') || ''
+      const isKnownIndustry = INDUSTRIES.includes(industry)
+      
       setFormData({
         prospectName: searchParams.get('prospectName') || '',
         prospectTitle: searchParams.get('prospectTitle') || '',
         company: company,
-        industry: searchParams.get('industry') || '',
+        industry: isKnownIndustry ? industry : (industry ? 'Other' : ''),
+        industryOther: isKnownIndustry ? '' : industry,
         context: searchParams.get('context') || '',
         messageType: searchParams.get('messageType') || 'LinkedIn Connection',
         messageHistory: '',
         messageLength: 'medium',
         toneOfVoice: 'professional',
         targetResult: '',
+        targetResultOther: '',
         sources: searchParams.get('sources') || ''
       })
       showToast('Form pre-filled from saved company', 'success')
     }
   }, [searchParams])
 
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (suggestionRef.current && !suggestionRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Filter suggestions based on company or prospect name input
+  const handleCompanyChange = (value: string) => {
+    setFormData({...formData, company: value})
+    
+    if (value.length >= 2) {
+      const filtered = savedCompanies.filter(c => 
+        c.company_name.toLowerCase().includes(value.toLowerCase()) ||
+        c.last_prospect_name?.toLowerCase().includes(value.toLowerCase())
+      )
+      setFilteredSuggestions(filtered)
+      setShowSuggestions(filtered.length > 0)
+    } else {
+      setShowSuggestions(false)
+    }
+  }
+
+  const selectSuggestion = (company: SavedCompany) => {
+    const isKnownIndustry = INDUSTRIES.includes(company.industry || '')
+    
+    setFormData({
+      ...formData,
+      company: company.company_name,
+      industry: isKnownIndustry ? company.industry : (company.industry ? 'Other' : ''),
+      industryOther: isKnownIndustry ? '' : (company.industry || ''),
+      prospectName: company.last_prospect_name || '',
+      prospectTitle: company.last_prospect_title || '',
+      context: company.last_context || '',
+      messageType: company.last_message_type || 'LinkedIn Connection'
+    })
+    setShowSuggestions(false)
+    showToast(`Loaded ${company.company_name} from saved`, 'success')
+  }
+
   const showToast = (message: string, type: 'success' | 'warning' | 'error') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3000)
   }
 
+  const toggleLocalModel = async () => {
+    if (useLocal) {
+      // Switching to cloud, no check needed
+      setUseLocal(false)
+      return
+    }
+    
+    // Switching to local, check availability
+    setCheckingModel(true)
+    
+    try {
+      const response = await fetch('/api/models/check')
+      const data = await response.json()
+      
+      if (data.available) {
+        setUseLocal(true)
+        if (data.hasCustomModel) {
+          showToast('Connected to local model', 'success')
+        } else if (data.hasBaseModel) {
+          showToast('Using base Llama model (custom model not found)', 'warning')
+        } else {
+          showToast('Connected to Ollama', 'success')
+        }
+      } else {
+        showToast(`Local model unavailable: ${data.error}`, 'error')
+        setUseLocal(false)
+      }
+    } catch (error) {
+      showToast('Cannot connect to local model', 'error')
+      setUseLocal(false)
+    } finally {
+      setCheckingModel(false)
+    }
+  }
+
+  const getEffectiveIndustry = () => {
+    return formData.industry === 'Other' ? formData.industryOther : formData.industry
+  }
+
+  const getEffectiveTargetResult = () => {
+    return formData.targetResult === 'Other' ? formData.targetResultOther : formData.targetResult
+  }
+
+  const isFormValid = () => {
+    return formData.prospectName.trim() && formData.company.trim() && formData.context.trim()
+  }
+
   const handleSubmit = async (e: React.FormEvent, adjustment?: string) => {
     e.preventDefault()
+    
+    if (!isFormValid()) {
+      showToast('Please fill in all required fields', 'error')
+      return
+    }
+    
     setLoading(true)
     setMessage('')
     setDisplayedSources([])
@@ -72,10 +252,19 @@ function HomeContent() {
     setLoadingStep('✨ Crafting message...')
     
     try {
+      const payload = {
+        ...formData,
+        industry: getEffectiveIndustry(),
+        targetResult: getEffectiveTargetResult(),
+        useLocal,
+        useWebResearch,
+        adjustment
+      }
+      
       const response = await fetch('/api/outreach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({...formData, useLocal, useWebResearch, adjustment})
+        body: JSON.stringify(payload)
       })
       
       const data = await response.json()
@@ -100,7 +289,7 @@ function HomeContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             company_name: formData.company,
-            industry: formData.industry,
+            industry: getEffectiveIndustry(),
             prospect_name: formData.prospectName,
             prospect_title: formData.prospectTitle,
             context: formData.context,
@@ -108,6 +297,11 @@ function HomeContent() {
           })
         })
         showToast('Company saved for tracking', 'success')
+        
+        // Refresh saved companies list
+        const response = await fetch('/api/companies')
+        const companiesData = await response.json()
+        setSavedCompanies(companiesData.companies || [])
       }
 
       if (data.metrics?.warnings?.length > 0) {
@@ -145,9 +339,33 @@ function HomeContent() {
     }
   }
 
+  const clearForm = () => {
+    setFormData({
+      prospectName: '',
+      prospectTitle: '',
+      company: '',
+      industry: '',
+      industryOther: '',
+      context: '',
+      messageType: 'LinkedIn Connection',
+      messageHistory: '',
+      messageLength: 'medium',
+      toneOfVoice: 'professional',
+      targetResult: '',
+      targetResultOther: '',
+      sources: ''
+    })
+    setMessage('')
+    setDisplayedSources([])
+    setMetrics(null)
+    setSaveCompany(false)
+  }
+
   const bgGradient = useLocal 
     ? 'from-slate-900 via-emerald-950 to-slate-900' 
     : 'from-slate-900 via-blue-950 to-slate-900'
+
+  const accentColor = useLocal ? 'emerald' : 'blue'
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'text-green-400'
@@ -211,10 +429,19 @@ function HomeContent() {
           <Link href="/saved" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
             <span className="text-xl">💾</span>
             <span>Saved Companies</span>
+            {savedCompanies.length > 0 && (
+              <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${useLocal ? 'bg-emerald-900/50 text-emerald-400' : 'bg-blue-900/50 text-blue-400'}`}>
+                {savedCompanies.length}
+              </span>
+            )}
           </Link>
           <Link href="/history" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
             <span className="text-xl">📊</span>
             <span>History</span>
+          </Link>
+          <Link href="/settings" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
+            <span className="text-xl">⚙️</span>
+            <span>Settings</span>
           </Link>
         </nav>
 
@@ -247,13 +474,20 @@ function HomeContent() {
               <div className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-500 ${useLocal ? 'bg-emerald-900/40 border border-emerald-700/50' : 'bg-blue-900/40 border border-blue-700/50'}`}>
                 <span className="text-xs text-slate-300 hidden sm:inline">Model:</span>
                 <button
-                  onClick={() => setUseLocal(!useLocal)}
-                  className={`relative inline-flex h-6 w-12 items-center rounded-full transition-all duration-500 ${useLocal ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                  onClick={toggleLocalModel}
+                  disabled={checkingModel}
+                  className={`relative inline-flex h-6 w-12 items-center rounded-full transition-all duration-500 disabled:opacity-50 ${useLocal ? 'bg-emerald-500' : 'bg-blue-500'}`}
                 >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-all duration-300 ${useLocal ? 'translate-x-7' : 'translate-x-1'}`} />
+                  {checkingModel ? (
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    </span>
+                  ) : (
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-all duration-300 ${useLocal ? 'translate-x-7' : 'translate-x-1'}`} />
+                  )}
                 </button>
                 <span className={`text-xs font-semibold ${useLocal ? 'text-emerald-400' : 'text-blue-400'}`}>
-                  {useLocal ? 'Local' : 'Cloud'}
+                  {checkingModel ? '...' : (useLocal ? 'Local' : 'Cloud')}
                 </span>
               </div>
 
@@ -280,17 +514,67 @@ function HomeContent() {
             {/* Form */}
             <div className="bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-slate-700/50 shadow-2xl overflow-hidden">
               <div className={`border-b border-slate-700/50 px-4 lg:px-6 py-4 bg-gradient-to-r ${useLocal ? 'from-emerald-900/20 to-transparent' : 'from-blue-900/20 to-transparent'}`}>
-                <h3 className="text-lg font-bold text-white">Prospect Information</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-white">Prospect Information</h3>
+                  <button
+                    onClick={clearForm}
+                    className="text-xs text-slate-400 hover:text-white transition-colors"
+                  >
+                    Clear form
+                  </button>
+                </div>
               </div>
 
               <form onSubmit={handleSubmit} className="p-4 lg:p-6 space-y-4">
+                {/* Company with suggestions */}
+                <div className="relative" ref={suggestionRef}>
+                  <label className="block text-sm font-semibold text-slate-300 mb-2">
+                    Company <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Start typing to search saved companies..."
+                    className={`w-full px-4 py-3 bg-slate-800/50 border rounded-xl focus:ring-2 text-white placeholder-slate-500 transition-all ${
+                      !formData.company.trim() ? 'border-slate-600/50' : `border-${accentColor}-500/50`
+                    } focus:ring-${accentColor}-500/50`}
+                    value={formData.company}
+                    onChange={(e) => handleCompanyChange(e.target.value)}
+                    required
+                  />
+                  
+                  {/* Suggestions dropdown */}
+                  {showSuggestions && (
+                    <div className="absolute z-20 w-full mt-1 bg-slate-800 border border-slate-600 rounded-xl shadow-xl overflow-hidden">
+                      <div className="px-3 py-2 text-xs text-slate-400 border-b border-slate-700">
+                        Saved companies
+                      </div>
+                      {filteredSuggestions.map((company) => (
+                        <button
+                          key={company.id}
+                          type="button"
+                          onClick={() => selectSuggestion(company)}
+                          className="w-full px-4 py-3 text-left hover:bg-slate-700/50 transition-colors border-b border-slate-700/50 last:border-0"
+                        >
+                          <div className="font-medium text-white">{company.company_name}</div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            {company.last_prospect_name && `${company.last_prospect_name} • `}
+                            {company.industry || 'No industry'}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-300 mb-2">Full Name</label>
+                    <label className="block text-sm font-semibold text-slate-300 mb-2">
+                      Full Name <span className="text-red-400">*</span>
+                    </label>
                     <input
                       type="text"
                       placeholder="John Smith"
-                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 ${useLocal ? 'focus:ring-emerald-500/50' : 'focus:ring-blue-500/50'} text-white placeholder-slate-500`}
+                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 focus:ring-${accentColor}-500/50 text-white placeholder-slate-500`}
                       value={formData.prospectName}
                       onChange={(e) => setFormData({...formData, prospectName: e.target.value})}
                       required
@@ -301,81 +585,125 @@ function HomeContent() {
                     <input
                       type="text"
                       placeholder="VP Engineering"
-                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 ${useLocal ? 'focus:ring-emerald-500/50' : 'focus:ring-blue-500/50'} text-white placeholder-slate-500`}
+                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 focus:ring-${accentColor}-500/50 text-white placeholder-slate-500`}
                       value={formData.prospectTitle}
                       onChange={(e) => setFormData({...formData, prospectTitle: e.target.value})}
-                      required
                     />
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-300 mb-2">Company</label>
+                {/* Industry dropdown */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-300">Industry</label>
+                  <select
+                    className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white focus:ring-2 focus:ring-${accentColor}-500/50`}
+                    value={formData.industry}
+                    onChange={(e) => setFormData({...formData, industry: e.target.value, industryOther: ''})}
+                  >
+                    <option value="">Select industry...</option>
+                    {INDUSTRIES.map((ind) => (
+                      <option key={ind} value={ind}>{ind}</option>
+                    ))}
+                  </select>
+                  
+                  {formData.industry === 'Other' && (
                     <input
                       type="text"
-                      placeholder="Acme Corp"
-                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 ${useLocal ? 'focus:ring-emerald-500/50' : 'focus:ring-blue-500/50'} text-white placeholder-slate-500`}
-                      value={formData.company}
-                      onChange={(e) => setFormData({...formData, company: e.target.value})}
-                      required
+                      placeholder="Enter industry..."
+                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 focus:ring-${accentColor}-500/50 text-white placeholder-slate-500`}
+                      value={formData.industryOther}
+                      onChange={(e) => setFormData({...formData, industryOther: e.target.value})}
+                      autoFocus
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-300 mb-2">Industry</label>
-                    <input
-                      type="text"
-                      placeholder="Healthcare Tech"
-                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 ${useLocal ? 'focus:ring-emerald-500/50' : 'focus:ring-blue-500/50'} text-white placeholder-slate-500`}
-                      value={formData.industry}
-                      onChange={(e) => setFormData({...formData, industry: e.target.value})}
-                      required
-                    />
-                  </div>
+                  )}
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-semibold text-slate-300 mb-2">Business Context</label>
+                  <label className="block text-sm font-semibold text-slate-300 mb-2">
+                    Business Context <span className="text-red-400">*</span>
+                  </label>
                   <textarea
-                    placeholder="Recent funding, expansion plans, technical challenges..."
-                    className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl h-24 focus:ring-2 ${useLocal ? 'focus:ring-emerald-500/50' : 'focus:ring-blue-500/50'} resize-none text-white placeholder-slate-500`}
+                    placeholder="Recent funding, expansion plans, technical challenges, job postings..."
+                    className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl h-28 focus:ring-2 focus:ring-${accentColor}-500/50 resize-none text-white placeholder-slate-500`}
                     value={formData.context}
                     onChange={(e) => setFormData({...formData, context: e.target.value})}
                     required
                   />
+                  <p className="text-xs text-slate-500 mt-1">The more specific context you provide, the better the message.</p>
                 </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-slate-300 mb-2">Sources / Links</label>
                   <textarea
-                    placeholder="https://example.com/article"
-                    className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl h-16 focus:ring-2 ${useLocal ? 'focus:ring-emerald-500/50' : 'focus:ring-blue-500/50'} resize-none text-white placeholder-slate-500`}
+                    placeholder="https://example.com/article (one per line)"
+                    className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl h-16 focus:ring-2 focus:ring-${accentColor}-500/50 resize-none text-white placeholder-slate-500`}
                     value={formData.sources}
                     onChange={(e) => setFormData({...formData, sources: e.target.value})}
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-slate-300 mb-2">Target Result</label>
-                  <input
-                    type="text"
-                    placeholder="Schedule discovery call..."
-                    className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 ${useLocal ? 'focus:ring-emerald-500/50' : 'focus:ring-blue-500/50'} text-white placeholder-slate-500`}
+                {/* Target Result dropdown */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-300">
+                    Target Result
+                    {formData.messageType === 'ABM' && (
+                      <span className="ml-2 text-xs text-purple-400 font-normal">(soft touch)</span>
+                    )}
+                  </label>
+                  <select
+                    className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white focus:ring-2 focus:ring-${accentColor}-500/50`}
                     value={formData.targetResult}
-                    onChange={(e) => setFormData({...formData, targetResult: e.target.value})}
-                  />
+                    onChange={(e) => setFormData({...formData, targetResult: e.target.value, targetResultOther: ''})}
+                  >
+                    <option value="">Select goal...</option>
+                    {(formData.messageType === 'ABM' ? ABM_TARGET_RESULTS : TARGET_RESULTS).map((result) => (
+                      <option key={result} value={result}>{result}</option>
+                    ))}
+                  </select>
+                  
+                  {formData.targetResult === 'Other' && (
+                    <input
+                      type="text"
+                      placeholder="Enter target result..."
+                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl focus:ring-2 focus:ring-${accentColor}-500/50 text-white placeholder-slate-500`}
+                      value={formData.targetResultOther}
+                      onChange={(e) => setFormData({...formData, targetResultOther: e.target.value})}
+                      autoFocus
+                    />
+                  )}
                 </div>
+
+                {/* ABM Info Banner */}
+                {formData.messageType === 'ABM' && (
+                  <div className="p-3 bg-purple-900/20 border border-purple-700/30 rounded-xl">
+                    <p className="text-xs text-purple-300">
+                      <span className="font-semibold">ABM Mode:</span> Generates warm, personalized messages focused on recognition and relationship building. No sales pitch or hard CTA.
+                    </p>
+                  </div>
+                )}
                 
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-2">Type</label>
                     <select
-                      className={`w-full px-3 py-2.5 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white text-sm`}
+                      className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white text-sm"
                       value={formData.messageType}
-                      onChange={(e) => setFormData({...formData, messageType: e.target.value})}
+                      onChange={(e) => {
+                        const newType = e.target.value
+                        setFormData({
+                          ...formData, 
+                          messageType: newType,
+                          // Reset target result when switching to/from ABM
+                          targetResult: '',
+                          targetResultOther: '',
+                          // ABM defaults to warm tone
+                          toneOfVoice: newType === 'ABM' ? 'warm' : formData.toneOfVoice
+                        })
+                      }}
                     >
                       <option>LinkedIn Connection</option>
                       <option>Email Outreach</option>
+                      <option>ABM</option>
                       <option>Conference Follow-up</option>
                       <option>Discovery Call</option>
                       <option>Response</option>
@@ -384,7 +712,7 @@ function HomeContent() {
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-2">Length</label>
                     <select
-                      className={`w-full px-3 py-2.5 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white text-sm`}
+                      className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white text-sm"
                       value={formData.messageLength}
                       onChange={(e) => setFormData({...formData, messageLength: e.target.value})}
                     >
@@ -396,13 +724,14 @@ function HomeContent() {
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-2">Tone</label>
                     <select
-                      className={`w-full px-3 py-2.5 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white text-sm`}
+                      className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white text-sm"
                       value={formData.toneOfVoice}
                       onChange={(e) => setFormData({...formData, toneOfVoice: e.target.value})}
                     >
                       <option value="professional">Professional</option>
                       <option value="casual">Casual</option>
                       <option value="friendly">Friendly</option>
+                      <option value="warm">Warm</option>
                       <option value="direct">Direct</option>
                       <option value="enthusiastic">Enthusiastic</option>
                     </select>
@@ -413,8 +742,8 @@ function HomeContent() {
                   <div className="border-t border-slate-700/50 pt-4">
                     <label className="block text-sm font-semibold text-slate-300 mb-2">Message History</label>
                     <textarea
-                      placeholder="Paste conversation..."
-                      className={`w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl h-28 resize-none text-white placeholder-slate-500`}
+                      placeholder="Paste the conversation thread..."
+                      className="w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl h-28 resize-none text-white placeholder-slate-500"
                       value={formData.messageHistory}
                       onChange={(e) => setFormData({...formData, messageHistory: e.target.value})}
                       required
@@ -422,7 +751,7 @@ function HomeContent() {
                   </div>
                 )}
 
-                <div className={`flex items-center gap-3 p-3 rounded-xl ${saveCompany ? (useLocal ? 'bg-emerald-900/30 border border-emerald-700/50' : 'bg-blue-900/30 border border-blue-700/50') : 'bg-slate-800/30 border border-slate-700/50'}`}>
+                <div className={`flex items-center gap-3 p-3 rounded-xl transition-all ${saveCompany ? (useLocal ? 'bg-emerald-900/30 border border-emerald-700/50' : 'bg-blue-900/30 border border-blue-700/50') : 'bg-slate-800/30 border border-slate-700/50'}`}>
                   <input
                     type="checkbox"
                     id="saveCompany"
@@ -437,8 +766,8 @@ function HomeContent() {
                 
                 <button
                   type="submit"
-                  disabled={loading}
-                  className={`w-full py-4 rounded-xl font-bold text-white shadow-lg transition-all disabled:opacity-50 ${
+                  disabled={loading || !isFormValid()}
+                  className={`w-full py-4 rounded-xl font-bold text-white shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                     useLocal 
                       ? 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500' 
                       : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500'
@@ -446,6 +775,12 @@ function HomeContent() {
                 >
                   {loading ? loadingStep || 'Generating...' : '✨ Generate Message'}
                 </button>
+                
+                {!isFormValid() && (
+                  <p className="text-xs text-center text-slate-500">
+                    Fill in Name, Company, and Context to generate
+                  </p>
+                )}
               </form>
             </div>
 
@@ -470,7 +805,12 @@ function HomeContent() {
                       <span className="text-4xl">🎯</span>
                     </div>
                     <p className="text-white text-lg font-semibold mb-2">Ready to Generate</p>
-                    <p className="text-slate-400 text-sm">Fill in the prospect details</p>
+                    <p className="text-slate-400 text-sm">Fill in the required fields</p>
+                    <div className="flex gap-2 mt-4">
+                      <span className="text-xs px-2 py-1 bg-slate-800 rounded text-slate-400">Name</span>
+                      <span className="text-xs px-2 py-1 bg-slate-800 rounded text-slate-400">Company</span>
+                      <span className="text-xs px-2 py-1 bg-slate-800 rounded text-slate-400">Context</span>
+                    </div>
                   </div>
                 ) : loading ? (
                   <div className="flex flex-col items-center justify-center h-80">
@@ -492,7 +832,7 @@ function HomeContent() {
                           <span className="text-slate-400">{metrics.wordCount} words</span>
                         </div>
                         {metrics.warnings?.length > 0 && (
-                          <span className="text-yellow-400 text-xs">⚠️ {metrics.warnings.length}</span>
+                          <span className="text-yellow-400 text-xs">⚠️ {metrics.warnings.length} warning{metrics.warnings.length > 1 ? 's' : ''}</span>
                         )}
                       </div>
                     )}
@@ -502,13 +842,13 @@ function HomeContent() {
                     </div>
 
                     <div className="flex gap-2">
-                      <button onClick={handleRegenerate} disabled={loading} className="flex-1 py-2 px-3 bg-slate-700/50 text-slate-300 rounded-lg hover:bg-slate-700 text-sm font-medium disabled:opacity-50">
+                      <button onClick={handleRegenerate} disabled={loading} className="flex-1 py-2 px-3 bg-slate-700/50 text-slate-300 rounded-lg hover:bg-slate-700 text-sm font-medium disabled:opacity-50 transition-colors">
                         🔄 Regenerate
                       </button>
-                      <button onClick={() => handleAdjust('shorter and more direct')} disabled={loading} className="flex-1 py-2 px-3 bg-slate-700/50 text-slate-300 rounded-lg hover:bg-slate-700 text-sm font-medium disabled:opacity-50">
+                      <button onClick={() => handleAdjust('shorter and more direct')} disabled={loading} className="flex-1 py-2 px-3 bg-slate-700/50 text-slate-300 rounded-lg hover:bg-slate-700 text-sm font-medium disabled:opacity-50 transition-colors">
                         📏 Shorter
                       </button>
-                      <button onClick={() => handleAdjust('longer with more detail')} disabled={loading} className="flex-1 py-2 px-3 bg-slate-700/50 text-slate-300 rounded-lg hover:bg-slate-700 text-sm font-medium disabled:opacity-50">
+                      <button onClick={() => handleAdjust('longer with more detail')} disabled={loading} className="flex-1 py-2 px-3 bg-slate-700/50 text-slate-300 rounded-lg hover:bg-slate-700 text-sm font-medium disabled:opacity-50 transition-colors">
                         📝 Longer
                       </button>
                     </div>
@@ -535,7 +875,7 @@ function HomeContent() {
                     <div className="flex gap-3">
                       <button
                         onClick={handleCopy}
-                        className={`flex-1 py-3 rounded-xl font-semibold ${
+                        className={`flex-1 py-3 rounded-xl font-semibold transition-colors ${
                           copied ? 'bg-green-500 text-white' : useLocal ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-blue-600 text-white hover:bg-blue-500'
                         }`}
                       >
@@ -543,7 +883,7 @@ function HomeContent() {
                       </button>
                       <button
                         onClick={() => { setMessage(''); setDisplayedSources([]); setMetrics(null); }}
-                        className="px-5 py-3 bg-slate-700/50 text-white rounded-xl hover:bg-slate-700 font-semibold"
+                        className="px-5 py-3 bg-slate-700/50 text-white rounded-xl hover:bg-slate-700 font-semibold transition-colors"
                       >
                         Clear
                       </button>

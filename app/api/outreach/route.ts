@@ -95,7 +95,8 @@ export async function POST(request: Request) {
     sources,
     useLocal,
     useWebResearch,
-    adjustment
+    adjustment,
+    userId
   } = await request.json()
 
   console.log(useLocal ? '🏠 LOCAL' : '☁️ CLOUD', useWebResearch ? '+ 🔍 RESEARCH' : '')
@@ -114,6 +115,7 @@ export async function POST(request: Request) {
     professional: 'Business tone. Respectful. No slang.',
     casual: 'Relaxed tone. Like texting a colleague.',
     friendly: 'Warm and personable. Show genuine interest.',
+    warm: 'Personal and genuine. Like a thoughtful note to someone you respect.',
     direct: 'Get to the point fast. No fluff. Blunt.',
     enthusiastic: 'High energy. Excited about their work.'
   }
@@ -221,6 +223,73 @@ CONVERSATION:
 ${messageHistory}
 
 Write response:`
+  } else if (messageType === 'ABM') {
+    // ABM: Soft touch, recognition-focused messages
+    systemPrompt = `${settings.systemPromptBase}
+
+You write warm, personalized ABM (Account-Based Marketing) messages. These are soft-touch messages focused on RECOGNITION and RELATIONSHIP BUILDING. NO SALES PITCH.
+
+## YOUR COMPANY:
+${settings.companyDescription}
+
+## CRITICAL ABM RULES:
+1. ${lengthInstructions[messageLength] || lengthInstructions.medium}
+2. Tone: Warm, genuine, personal. Like a thoughtful peer, not a salesperson.
+3. Lead with SPECIFIC recognition of their achievement or work
+4. Show you did real research. Reference exact details.
+5. NO sales pitch. NO CTA for meetings or demos.
+6. End with a warm closing. Holiday wishes, congratulations, or genuine well-wishes.
+7. NEVER start with "I"
+8. Short paragraphs. Conversational. Like a personal note.
+
+## BANNED PHRASES - NEVER USE:
+${bannedPhrasesText}
+- "I'd love to connect"
+- "Would you be open to"
+- "Let me know if"
+- "I wanted to reach out"
+- "Quick question"
+- "Picking your brain"
+- "Synergies"
+- Any meeting request
+
+## ABM MESSAGE STRUCTURE:
+1. Opening: First name only, no "Hi" or "Hey"
+2. Recognition: Specific achievement or work you noticed (1-2 sentences)
+3. Insight: Show you understand WHY it matters (1-2 sentences)
+4. Personal Touch: Genuine observation or connection (1 sentence)
+5. Warm Close: Well-wishes, seasonal greeting, or simple acknowledgment (1 sentence)
+
+## EXAMPLE TONE (study these):
+
+Example 1:
+"Brittany,
+Congrats on the Chicago Titan 100. COO for six months and already being recognized alongside the region's top executives.
+Eight functions. Gen-3 succession. That's a lot to navigate while building your leadership profile externally. Well deserved recognition.
+Enjoy the season. Wishing you and the team a Merry Christmas!"
+
+Example 2:
+"Alex,
+Caught John's piece in Sustainable Packaging News on circularity and flexible packaging.
+Love what you all are building. Most sustainability talk in plastics feels defensive. This was different. Real engineering thinking about how caps and spouts fit into a closed loop system.
+Hope you get some real time off with family this Christmas."
+
+Example 3:
+"Gary,
+Five wins at the INCA Awards. That's a statement.
+First full year after the acquisition and you're stacking the right proof points. Strong way to finish.
+Hope you and the team get a chance to switch off over the holidays. Well deserved."
+
+${targetResult ? `## SOFT TOUCH GOAL: ${targetResult}` : ''}
+${sources ? `## REFERENCE SOURCES: ${sources}` : ''}
+
+OUTPUT: Message body only. No subject line. No formal signature.`
+
+    userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
+Industry: ${industry}
+Achievement/Context: ${context}${researchContext}
+
+Write a warm ABM message recognizing their work:`
   } else {
     userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
 Industry: ${industry}
@@ -329,14 +398,24 @@ Write message:`
                                generatedMessage.toLowerCase().includes(prospectName.split(' ')[0].toLowerCase())
   const endsWithQuestion = generatedMessage.trim().endsWith('?')
   
+  // ABM-specific checks
+  const isABM = messageType === 'ABM'
+  const hasWarmClosing = /\b(christmas|holiday|season|well deserved|congrats|congratulations|enjoy|wishing)\b/i.test(generatedMessage)
+  
   let qualityScore = 100
   if (startsWithI) qualityScore -= 20
   if (hasBannedPhrases) qualityScore -= 25
-  if (charCount > 500) qualityScore -= 10
+  if (charCount > 500 && !isABM) qualityScore -= 10
+  if (charCount > 800) qualityScore -= 10 // Even ABM shouldn't be too long
   if (charCount < 50) qualityScore -= 20
   if (wordCount < 10) qualityScore -= 15
   if (!hasSpecificReference) qualityScore -= 10
+  
+  // ABM doesn't need a question, other types benefit from it
   if (!endsWithQuestion && messageType === 'LinkedIn Connection') qualityScore -= 5
+  
+  // ABM bonus for warm closing
+  if (isABM && hasWarmClosing) qualityScore = Math.min(100, qualityScore + 5)
 
   // Ensure score doesn't go below 0
   qualityScore = Math.max(0, qualityScore)
@@ -346,14 +425,22 @@ Write message:`
   if (hasBannedPhrases) warnings.push('Contains generic/banned phrases')
   if (charCount > 300 && messageType === 'LinkedIn Connection') warnings.push('Over LinkedIn 300 char limit')
   if (!hasSpecificReference) warnings.push('Missing specific reference to prospect/company')
-  if (!endsWithQuestion) warnings.push('Consider ending with a question')
+  if (!endsWithQuestion && !isABM) warnings.push('Consider ending with a question')
+  if (isABM && !hasWarmClosing) warnings.push('ABM: Consider adding a warm closing')
 
   // Save to database
   try {
-    await sql`
-      INSERT INTO messages (prospect_name, prospect_title, company, industry, context, message_type, generated_message)
-      VALUES (${prospectName}, ${prospectTitle}, ${company}, ${industry}, ${context}, ${messageType}, ${generatedMessage})
-    `
+    if (userId) {
+      await sql`
+        INSERT INTO messages (prospect_name, prospect_title, company, industry, context, message_type, generated_message, user_id)
+        VALUES (${prospectName}, ${prospectTitle}, ${company}, ${industry}, ${context}, ${messageType}, ${generatedMessage}, ${userId})
+      `
+    } else {
+      await sql`
+        INSERT INTO messages (prospect_name, prospect_title, company, industry, context, message_type, generated_message)
+        VALUES (${prospectName}, ${prospectTitle}, ${company}, ${industry}, ${context}, ${messageType}, ${generatedMessage})
+      `
+    }
   } catch (error) {
     console.error('DB error:', error)
   }

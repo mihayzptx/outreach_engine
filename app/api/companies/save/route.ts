@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     prospect_name, 
     prospect_title, 
     context,
-    message_type 
+    message_type
   } = await request.json()
 
   try {
