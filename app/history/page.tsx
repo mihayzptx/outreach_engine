@@ -8,6 +8,7 @@ export default function History() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [copiedId, setCopiedId] = useState<number | null>(null)
 
   useEffect(() => {
     fetchMessages()
@@ -26,30 +27,42 @@ export default function History() {
   }
 
   const filteredMessages = messages.filter(msg => 
-    msg.prospect_name.toLowerCase().includes(filter.toLowerCase()) ||
-    msg.company.toLowerCase().includes(filter.toLowerCase()) ||
-    msg.message_type.toLowerCase().includes(filter.toLowerCase())
+    msg.prospect_name?.toLowerCase().includes(filter.toLowerCase()) ||
+    msg.company?.toLowerCase().includes(filter.toLowerCase()) ||
+    msg.message_type?.toLowerCase().includes(filter.toLowerCase())
   )
 
-  const copyMessage = (text: string) => {
+  const copyMessage = (text: string, id: number) => {
     navigator.clipboard.writeText(text)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
+
+  const getMessageTypeColor = (type: string) => {
+    switch (type) {
+      case 'ABM': return 'bg-purple-600'
+      case 'LinkedIn Connection': return 'bg-blue-600'
+      case 'Email Outreach': return 'bg-green-600'
+      case 'Conference Follow-up': return 'bg-orange-600'
+      default: return 'bg-slate-600'
+    }
   }
 
   return (
-    <div className="flex h-screen bg-slate-900">
+    <div className="flex h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800">
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-20 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-64 bg-slate-800 border-r border-slate-700 transition-transform duration-300 z-30 h-full flex flex-col`}>
-        <div className="p-6 border-b border-slate-700">
+      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-64 bg-slate-900/80 backdrop-blur-xl border-r border-slate-700/50 transition-all duration-300 z-30 h-full flex flex-col`}>
+        <div className="p-6 border-b border-slate-700/50">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg">
               <span className="text-white font-bold">TS</span>
             </div>
             <div>
@@ -60,49 +73,45 @@ export default function History() {
         </div>
 
         <nav className="flex-1 p-4 space-y-2">
-  <Link 
-    href="/"
-    onClick={() => setSidebarOpen(false)}
-    className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700 rounded-lg font-medium"
-  >
-    <span className="text-xl">✨</span>
-    <span>Generate</span>
-  </Link>
-  <Link 
-    href="/bulk" 
-    onClick={() => setSidebarOpen(false)}
-    className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700 rounded-lg font-medium"
-  >
-    <span className="text-xl">📦</span>
-    <span>Bulk Generate</span>
-  </Link>
-  <Link 
-    href="/saved" 
-    onClick={() => setSidebarOpen(false)}
-    className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700 rounded-lg font-medium"
-  >
-    <span className="text-xl">💾</span>
-    <span>Saved Companies</span>
-  </Link>
-  <button 
-    onClick={() => setSidebarOpen(false)}
-    className="w-full flex items-center gap-3 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium"
-  >
-    <span className="text-xl">📊</span>
-    <span>History</span>
-  </button>
-</nav>
+          <Link href="/" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
+            <span className="text-xl">✨</span>
+            <span>Generate</span>
+          </Link>
+          <Link href="/bulk" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
+            <span className="text-xl">📦</span>
+            <span>Bulk Generate</span>
+          </Link>
+          <Link href="/saved" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
+            <span className="text-xl">💾</span>
+            <span>Saved Companies</span>
+          </Link>
+          <button className="w-full flex items-center gap-3 px-4 py-3 bg-blue-600 text-white rounded-xl font-medium shadow-lg">
+            <span className="text-xl">📊</span>
+            <span>History</span>
+          </button>
+          <Link href="/settings" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
+            <span className="text-xl">⚙️</span>
+            <span>Settings</span>
+          </Link>
+        </nav>
+
+        <div className="p-4 border-t border-slate-700/50">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-900/30">
+            <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
+            <span className="text-xs text-slate-300">📊 {messages.length} messages</span>
+          </div>
+        </div>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto w-full">
-        {/* Top Bar */}
-        <header className="bg-slate-800 border-b border-slate-700 px-4 lg:px-8 py-4 sticky top-0 z-10">
+        {/* Header */}
+        <header className="bg-slate-900/60 backdrop-blur-xl border-b border-slate-700/50 px-4 lg:px-8 py-4 sticky top-0 z-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 hover:bg-slate-700 rounded-lg text-white"
+                className="lg:hidden p-2 hover:bg-slate-800/50 rounded-xl text-white"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -115,7 +124,7 @@ export default function History() {
             </div>
             <Link 
               href="/"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm"
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500 font-medium text-sm shadow-lg transition-all"
             >
               + New Message
             </Link>
@@ -124,33 +133,36 @@ export default function History() {
 
         {/* Content */}
         <div className="p-4 lg:p-8">
-          <div className="max-w-7xl mx-auto">
+          <div className="max-w-7xl mx-auto space-y-6">
             {/* Search Filter */}
-            <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl p-4 mb-6">
-              <input
-                type="text"
-                placeholder="Search by name, company, or message type..."
-                className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white placeholder-slate-500 text-base"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
+            <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-4">
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+                <input
+                  type="text"
+                  placeholder="Search by name, company, or message type..."
+                  className="w-full pl-12 pr-4 py-3 bg-slate-900/50 border border-slate-600/50 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 text-white placeholder-slate-500"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              </div>
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-slate-400 font-medium">Total Messages</p>
                     <p className="text-3xl font-bold text-white mt-2">{messages.length}</p>
                   </div>
-                  <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
                     <span className="text-2xl">📝</span>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl p-6">
+              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-slate-400 font-medium">Companies Contacted</p>
@@ -158,13 +170,13 @@ export default function History() {
                       {new Set(messages.map(m => m.company)).size}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center">
+                  <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
                     <span className="text-2xl">🏢</span>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl p-6">
+              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-slate-400 font-medium">This Week</p>
@@ -176,7 +188,7 @@ export default function History() {
                       }).length}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center">
+                  <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
                     <span className="text-2xl">📅</span>
                   </div>
                 </div>
@@ -193,8 +205,10 @@ export default function History() {
                 <p className="text-white text-lg font-semibold mt-6">Loading history...</p>
               </div>
             ) : filteredMessages.length === 0 ? (
-              <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl p-12 text-center">
-                <div className="text-6xl mb-4">📭</div>
+              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-12 text-center">
+                <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-slate-700/50 flex items-center justify-center">
+                  <span className="text-4xl">📭</span>
+                </div>
                 <p className="text-white text-lg font-semibold mb-2">
                   {filter ? 'No messages match your search' : 'No messages yet'}
                 </p>
@@ -204,7 +218,7 @@ export default function History() {
                 {!filter && (
                   <Link 
                     href="/"
-                    className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                    className="inline-block px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-500 font-medium shadow-lg transition-all"
                   >
                     Generate Message
                   </Link>
@@ -213,40 +227,43 @@ export default function History() {
             ) : (
               <div className="space-y-4">
                 {filteredMessages.map((msg) => (
-                  <div key={msg.id} className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl p-6">
+                  <div key={msg.id} className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6 hover:border-slate-600/50 transition-all">
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
+                        <div className="flex items-center gap-3 mb-2 flex-wrap">
                           <h3 className="text-lg font-bold text-white">{msg.prospect_name}</h3>
-                          <span className="px-3 py-1 bg-blue-600 text-white text-xs rounded-full">
+                          <span className={`px-3 py-1 ${getMessageTypeColor(msg.message_type)} text-white text-xs rounded-full`}>
                             {msg.message_type}
                           </span>
                         </div>
-                        <div className="flex flex-wrap gap-4 text-sm text-slate-400">
-                          <span>📧 {msg.prospect_title}</span>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-400">
+                          {msg.prospect_title && <span>👤 {msg.prospect_title}</span>}
                           <span>🏢 {msg.company}</span>
-                          <span>🏭 {msg.industry}</span>
-                          <span>🕒 {new Date(msg.created_at).toLocaleDateString()} {new Date(msg.created_at).toLocaleTimeString()}</span>
+                          {msg.industry && <span>🏭 {msg.industry}</span>}
+                          <span>🕒 {new Date(msg.created_at).toLocaleDateString()} {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                         </div>
                       </div>
                       <button
-                        onClick={() => copyMessage(msg.generated_message)}
-                        className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 font-medium text-sm flex items-center gap-2"
+                        onClick={() => copyMessage(msg.generated_message, msg.id)}
+                        className={`px-4 py-2 rounded-xl font-medium text-sm flex items-center gap-2 transition-all ${
+                          copiedId === msg.id 
+                            ? 'bg-green-600 text-white' 
+                            : 'bg-slate-700/50 text-white hover:bg-slate-600/50'
+                        }`}
                       >
-                        📋 Copy
+                        {copiedId === msg.id ? '✓ Copied' : '📋 Copy'}
                       </button>
                     </div>
 
                     {msg.context && (
-                      <div className="mb-4 pb-4 border-b border-slate-700">
+                      <div className="mb-4 pb-4 border-b border-slate-700/50">
                         <p className="text-xs font-semibold text-slate-400 mb-2">Context:</p>
-                        <p className="text-sm text-slate-300">{msg.context}</p>
+                        <p className="text-sm text-slate-300 line-clamp-2">{msg.context}</p>
                       </div>
                     )}
 
-                    <div className="bg-slate-900 border border-slate-600 rounded-lg p-4">
-                      <p className="text-sm font-semibold text-slate-400 mb-2">Generated Message:</p>
-                      <p className="text-white leading-relaxed whitespace-pre-wrap text-base">
+                    <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4">
+                      <p className="text-white leading-relaxed whitespace-pre-wrap">
                         {msg.generated_message}
                       </p>
                     </div>
