@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true)
@@ -44,32 +43,38 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+      {/* Background pattern */}
+      <div className="absolute inset-0 opacity-[0.03]" style={{
+        backgroundImage: `radial-gradient(circle at 1px 1px, rgb(250 204 21) 1px, transparent 0)`,
+        backgroundSize: '32px 32px'
+      }} />
+      
+      <div className="w-full max-w-sm relative">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <span className="text-white font-bold text-2xl">TS</span>
+          <div className="w-14 h-14 bg-yellow-400 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-yellow-400/20">
+            <span className="text-zinc-900 font-black text-xl">TS</span>
           </div>
-          <h1 className="text-2xl font-bold text-white">Tech-stack.io</h1>
-          <p className="text-slate-400 text-sm">Outreach Engine</p>
+          <h1 className="text-xl font-bold text-white">Tech-stack.io</h1>
+          <p className="text-zinc-500 text-sm mt-1">Outreach Engine</p>
         </div>
 
         {/* Card */}
-        <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
-          <h2 className="text-xl font-bold text-white mb-6 text-center">
-            {isLogin ? 'Welcome Back' : 'Create Account'}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+          <h2 className="text-lg font-semibold text-white mb-6 text-center">
+            {isLogin ? 'Welcome back' : 'Create account'}
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Name</label>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase tracking-wide">Name</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600/50 rounded-xl text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                  className="w-full px-3 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-white placeholder-zinc-600 focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-colors"
                   placeholder="Your name"
                   required={!isLogin}
                 />
@@ -77,24 +82,24 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Email</label>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase tracking-wide">Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600/50 rounded-xl text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                className="w-full px-3 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-white placeholder-zinc-600 focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-colors"
                 placeholder="you@company.com"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Password</label>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase tracking-wide">Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600/50 rounded-xl text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+                className="w-full px-3 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-white placeholder-zinc-600 focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-colors"
                 placeholder="••••••••"
                 required
                 minLength={6}
@@ -102,7 +107,7 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-xl text-red-400 text-sm">
+              <div className="px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
                 {error}
               </div>
             )}
@@ -110,12 +115,12 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-medium hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
+              className="w-full py-2.5 bg-yellow-400 text-zinc-900 rounded-lg font-semibold hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  {isLogin ? 'Signing in...' : 'Creating account...'}
+                  <span className="w-4 h-4 border-2 border-zinc-900/30 border-t-zinc-900 rounded-full animate-spin"></span>
+                  {isLogin ? 'Signing in...' : 'Creating...'}
                 </span>
               ) : (
                 isLogin ? 'Sign In' : 'Create Account'
@@ -126,15 +131,15 @@ export default function LoginPage() {
           <div className="mt-6 text-center">
             <button
               onClick={() => { setIsLogin(!isLogin); setError('') }}
-              className="text-blue-400 hover:text-blue-300 text-sm"
+              className="text-zinc-400 hover:text-yellow-400 text-sm transition-colors"
             >
               {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
             </button>
           </div>
         </div>
 
-        <p className="text-center text-slate-500 text-xs mt-6">
-          © 2024 Tech-stack.io. All rights reserved.
+        <p className="text-center text-zinc-600 text-xs mt-6">
+          © 2024 Tech-stack.io
         </p>
       </div>
     </div>

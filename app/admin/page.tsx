@@ -15,9 +15,7 @@ interface User {
 }
 
 const ROLE_COLORS: Record<string, string> = {
-  admin: 'bg-red-500',
-  manager: 'bg-purple-500',
-  user: 'bg-blue-500'
+  admin: 'bg-red-500', manager: 'bg-purple-500', user: 'bg-blue-500'
 }
 
 export default function AdminPage() {
@@ -29,18 +27,12 @@ export default function AdminPage() {
   const [error, setError] = useState('')
   const router = useRouter()
 
-  useEffect(() => {
-    checkAdmin()
-    fetchUsers()
-  }, [])
+  useEffect(() => { checkAdmin(); fetchUsers() }, [])
 
   const checkAdmin = async () => {
     const res = await fetch('/api/auth/me')
     const data = await res.json()
-    if (!data.user || data.user.role !== 'admin') {
-      router.push('/')
-      return
-    }
+    if (!data.user || data.user.role !== 'admin') { router.push('/'); return }
     setCurrentUser(data.user)
   }
 
@@ -49,17 +41,13 @@ export default function AdminPage() {
       const res = await fetch('/api/admin/users')
       const data = await res.json()
       setUsers(data.users || [])
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading(false)
-    }
+    } catch { }
+    finally { setLoading(false) }
   }
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    
     try {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
@@ -67,17 +55,12 @@ export default function AdminPage() {
         body: JSON.stringify(newUser)
       })
       const data = await res.json()
-      
       if (data.success) {
         setShowAddModal(false)
         setNewUser({ email: '', password: '', name: '', role: 'user' })
         fetchUsers()
-      } else {
-        setError(data.error)
-      }
-    } catch {
-      setError('Failed to create user')
-    }
+      } else setError(data.error)
+    } catch { setError('Failed to create user') }
   }
 
   const handleRoleChange = async (userId: number, newRole: string) => {
@@ -100,7 +83,6 @@ export default function AdminPage() {
 
   const handleDeleteUser = async (userId: number) => {
     if (!confirm('Delete this user?')) return
-    
     await fetch('/api/admin/users', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -113,71 +95,44 @@ export default function AdminPage() {
 
   if (!currentUser || currentUser.role !== 'admin') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800">
+    <div className="min-h-screen bg-zinc-950">
       {/* Add User Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-md p-6">
-            <h3 className="text-xl font-bold text-white mb-4">Add New User</h3>
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Add New User</h3>
             <form onSubmit={handleAddUser} className="space-y-4">
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Name</label>
-                <input
-                  type="text"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white"
-                  required
-                />
+                <label className="text-xs text-zinc-500 uppercase block mb-1">Name</label>
+                <input type="text" value={newUser.name} onChange={e => setNewUser({...newUser, name: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" required />
               </div>
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Email</label>
-                <input
-                  type="email"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white"
-                  required
-                />
+                <label className="text-xs text-zinc-500 uppercase block mb-1">Email</label>
+                <input type="email" value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" required />
               </div>
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Password</label>
-                <input
-                  type="password"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white"
-                  required
-                  minLength={6}
-                />
+                <label className="text-xs text-zinc-500 uppercase block mb-1">Password</label>
+                <input type="password" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" required minLength={6} />
               </div>
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Role</label>
-                <select
-                  value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white"
-                >
+                <label className="text-xs text-zinc-500 uppercase block mb-1">Role</label>
+                <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm">
                   <option value="user">User</option>
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
               {error && <p className="text-red-400 text-sm">{error}</p>}
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 bg-slate-700 text-white rounded-lg">
-                  Cancel
-                </button>
-                <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg">
-                  Create User
-                </button>
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 bg-zinc-800 text-white rounded-lg text-sm">Cancel</button>
+                <button type="submit" className="flex-1 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold">Create</button>
               </div>
             </form>
           </div>
@@ -185,76 +140,68 @@ export default function AdminPage() {
       )}
 
       {/* Header */}
-      <header className="bg-slate-900/60 backdrop-blur-xl border-b border-slate-700/50 px-6 py-4">
-        <div className="flex items-center justify-between">
+      <header className="bg-zinc-900 border-b border-zinc-800 px-6 py-4">
+        <div className="flex items-center justify-between max-w-6xl mx-auto">
           <div className="flex items-center gap-4">
-            <Link href="/" className="text-slate-400 hover:text-white">← Back</Link>
-            <div>
-              <h1 className="text-2xl font-bold text-white">User Management</h1>
-              <p className="text-slate-400 text-sm">Manage users and roles</p>
-            </div>
+            <Link href="/" className="text-zinc-500 hover:text-white text-sm">← Back</Link>
+            <h1 className="text-lg font-semibold text-white">User Management</h1>
           </div>
-          <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500">
+          <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold hover:bg-yellow-300">
             + Add User
           </button>
         </div>
       </header>
 
       {/* Content */}
-      <main className="p-6">
+      <main className="max-w-6xl mx-auto p-6">
         {/* Stats */}
         <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-            <p className="text-slate-400 text-sm">Total Users</p>
-            <p className="text-2xl font-bold text-white">{users.length}</p>
-          </div>
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-            <p className="text-slate-400 text-sm">Admins</p>
-            <p className="text-2xl font-bold text-red-400">{users.filter(u => u.role === 'admin').length}</p>
-          </div>
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-            <p className="text-slate-400 text-sm">Managers</p>
-            <p className="text-2xl font-bold text-purple-400">{users.filter(u => u.role === 'manager').length}</p>
-          </div>
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-            <p className="text-slate-400 text-sm">Users</p>
-            <p className="text-2xl font-bold text-blue-400">{users.filter(u => u.role === 'user').length}</p>
-          </div>
+          {[
+            { label: 'Total Users', value: users.length, color: 'text-white' },
+            { label: 'Admins', value: users.filter(u => u.role === 'admin').length, color: 'text-red-400' },
+            { label: 'Managers', value: users.filter(u => u.role === 'manager').length, color: 'text-purple-400' },
+            { label: 'Users', value: users.filter(u => u.role === 'user').length, color: 'text-blue-400' }
+          ].map((stat, i) => (
+            <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+              <p className="text-zinc-500 text-xs uppercase">{stat.label}</p>
+              <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
+            </div>
+          ))}
         </div>
 
         {/* Users Table */}
-        <div className="bg-slate-800/50 rounded-2xl border border-slate-700/50 overflow-hidden">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
           <table className="w-full">
-            <thead className="bg-slate-900/50">
+            <thead className="bg-zinc-950">
               <tr>
-                <th className="text-left text-slate-400 text-sm font-medium px-4 py-3">User</th>
-                <th className="text-left text-slate-400 text-sm font-medium px-4 py-3">Role</th>
-                <th className="text-left text-slate-400 text-sm font-medium px-4 py-3">Status</th>
-                <th className="text-left text-slate-400 text-sm font-medium px-4 py-3">Created</th>
-                <th className="text-left text-slate-400 text-sm font-medium px-4 py-3">Last Login</th>
-                <th className="text-left text-slate-400 text-sm font-medium px-4 py-3">Actions</th>
+                <th className="text-left text-xs text-zinc-500 font-medium px-4 py-3 uppercase">User</th>
+                <th className="text-left text-xs text-zinc-500 font-medium px-4 py-3 uppercase">Role</th>
+                <th className="text-left text-xs text-zinc-500 font-medium px-4 py-3 uppercase">Status</th>
+                <th className="text-left text-xs text-zinc-500 font-medium px-4 py-3 uppercase">Created</th>
+                <th className="text-left text-xs text-zinc-500 font-medium px-4 py-3 uppercase">Last Login</th>
+                <th className="text-left text-xs text-zinc-500 font-medium px-4 py-3 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody>
               {users.map(user => (
-                <tr key={user.id} className="border-t border-slate-700/50 hover:bg-slate-800/30">
+                <tr key={user.id} className="border-t border-zinc-800 hover:bg-zinc-950/50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-bold">
+                      <div className="w-9 h-9 bg-yellow-400 rounded-full flex items-center justify-center text-zinc-900 font-bold text-sm">
                         {user.name?.charAt(0) || 'U'}
                       </div>
                       <div>
-                        <p className="text-white font-medium">{user.name}</p>
-                        <p className="text-slate-400 text-sm">{user.email}</p>
+                        <p className="text-white text-sm font-medium">{user.name}</p>
+                        <p className="text-zinc-500 text-xs">{user.email}</p>
                       </div>
                     </div>
                   </td>
                   <td className="px-4 py-3">
                     <select
                       value={user.role}
-                      onChange={(e) => handleRoleChange(user.id, e.target.value)}
+                      onChange={e => handleRoleChange(user.id, e.target.value)}
                       disabled={user.id === currentUser?.id}
-                      className={`px-2 py-1 rounded-lg text-white text-sm ${ROLE_COLORS[user.role]} disabled:opacity-50`}
+                      className={`px-2 py-1 rounded text-xs text-white ${ROLE_COLORS[user.role]} disabled:opacity-50`}
                     >
                       <option value="user">User</option>
                       <option value="manager">Manager</option>
@@ -265,19 +212,16 @@ export default function AdminPage() {
                     <button
                       onClick={() => handleToggleActive(user.id, user.is_active)}
                       disabled={user.id === currentUser?.id}
-                      className={`px-3 py-1 rounded-lg text-sm ${user.is_active ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'} disabled:opacity-50`}
+                      className={`px-2 py-1 rounded text-xs ${user.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'} disabled:opacity-50`}
                     >
                       {user.is_active ? 'Active' : 'Disabled'}
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-slate-400 text-sm">{formatDate(user.created_at)}</td>
-                  <td className="px-4 py-3 text-slate-400 text-sm">{formatDate(user.last_login)}</td>
+                  <td className="px-4 py-3 text-zinc-500 text-sm">{formatDate(user.created_at)}</td>
+                  <td className="px-4 py-3 text-zinc-500 text-sm">{formatDate(user.last_login)}</td>
                   <td className="px-4 py-3">
                     {user.id !== currentUser?.id && (
-                      <button
-                        onClick={() => handleDeleteUser(user.id)}
-                        className="px-3 py-1 bg-red-900/50 text-red-400 rounded-lg text-sm hover:bg-red-900"
-                      >
+                      <button onClick={() => handleDeleteUser(user.id)} className="px-2 py-1 bg-red-500/20 text-red-400 rounded text-xs hover:bg-red-500/30">
                         Delete
                       </button>
                     )}
@@ -288,35 +232,32 @@ export default function AdminPage() {
           </table>
         </div>
 
-        {/* RBAC Info */}
-        <div className="mt-6 bg-slate-800/50 rounded-2xl border border-slate-700/50 p-6">
-          <h3 className="text-lg font-bold text-white mb-4">Role Permissions</h3>
+        {/* Permissions Info */}
+        <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+          <h3 className="text-sm font-semibold text-white mb-4">Role Permissions</h3>
           <div className="grid grid-cols-3 gap-4">
-            <div className="bg-red-900/20 border border-red-700/50 rounded-xl p-4">
-              <h4 className="text-red-400 font-medium mb-2">Admin</h4>
-              <ul className="text-sm text-slate-300 space-y-1">
-                <li>• Full access to all features</li>
-                <li>• Manage all users</li>
-                <li>• View all companies & messages</li>
-                <li>• Edit system settings</li>
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+              <h4 className="text-red-400 font-medium text-sm mb-2">Admin</h4>
+              <ul className="text-xs text-zinc-400 space-y-1">
+                <li>• Full access</li>
+                <li>• Manage users</li>
+                <li>• Edit settings</li>
               </ul>
             </div>
-            <div className="bg-purple-900/20 border border-purple-700/50 rounded-xl p-4">
-              <h4 className="text-purple-400 font-medium mb-2">Manager</h4>
-              <ul className="text-sm text-slate-300 space-y-1">
-                <li>• Full access to own data</li>
+            <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+              <h4 className="text-purple-400 font-medium text-sm mb-2">Manager</h4>
+              <ul className="text-xs text-zinc-400 space-y-1">
+                <li>• Own data access</li>
                 <li>• View team data</li>
                 <li>• Generate messages</li>
-                <li>• Cannot manage users</li>
               </ul>
             </div>
-            <div className="bg-blue-900/20 border border-blue-700/50 rounded-xl p-4">
-              <h4 className="text-blue-400 font-medium mb-2">User</h4>
-              <ul className="text-sm text-slate-300 space-y-1">
-                <li>• Access to own data only</li>
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+              <h4 className="text-blue-400 font-medium text-sm mb-2">User</h4>
+              <ul className="text-xs text-zinc-400 space-y-1">
+                <li>• Own data only</li>
                 <li>• Generate messages</li>
                 <li>• Save companies</li>
-                <li>• View own history</li>
               </ul>
             </div>
           </div>

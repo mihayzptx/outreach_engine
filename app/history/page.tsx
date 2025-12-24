@@ -2,276 +2,157 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import UserNav from '@/components/UserNav'
 
-export default function History() {
-  const [messages, setMessages] = useState<any[]>([])
+interface Message {
+  id: number
+  company: string
+  prospect_name: string
+  prospect_title: string
+  message_type: string
+  message: string
+  quality_score: number
+  created_at: string
+  user_name?: string
+}
+
+export default function HistoryPage() {
+  const [messages, setMessages] = useState<Message[]>([])
+  const [filtered, setFiltered] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [selected, setSelected] = useState<Message | null>(null)
+  const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
-    fetchMessages()
-  }, [])
+  useEffect(() => { fetchHistory() }, [])
+  useEffect(() => { applyFilters() }, [messages, search, typeFilter])
 
-  const fetchMessages = async () => {
+  const fetchHistory = async () => {
     try {
-      const response = await fetch('/api/messages')
-      const data = await response.json()
+      const res = await fetch('/api/history')
+      const data = await res.json()
       setMessages(data.messages || [])
-    } catch (error) {
-      console.error('Error fetching messages:', error)
-    } finally {
-      setLoading(false)
+    } catch { }
+    finally { setLoading(false) }
+  }
+
+  const applyFilters = () => {
+    let result = [...messages]
+    if (search) {
+      const q = search.toLowerCase()
+      result = result.filter(m => m.company?.toLowerCase().includes(q) || m.prospect_name?.toLowerCase().includes(q))
     }
+    if (typeFilter) result = result.filter(m => m.message_type === typeFilter)
+    setFiltered(result)
   }
 
-  const filteredMessages = messages.filter(msg => 
-    msg.prospect_name?.toLowerCase().includes(filter.toLowerCase()) ||
-    msg.company?.toLowerCase().includes(filter.toLowerCase()) ||
-    msg.message_type?.toLowerCase().includes(filter.toLowerCase())
-  )
-
-  const copyMessage = (text: string, id: number) => {
-    navigator.clipboard.writeText(text)
-    setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 2000)
+  const copyMessage = (msg: string) => {
+    navigator.clipboard.writeText(msg)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
-  const getMessageTypeColor = (type: string) => {
-    switch (type) {
-      case 'ABM': return 'bg-purple-600'
-      case 'LinkedIn Connection': return 'bg-blue-600'
-      case 'Email Outreach': return 'bg-green-600'
-      case 'Conference Follow-up': return 'bg-orange-600'
-      default: return 'bg-slate-600'
-    }
-  }
+  const formatDate = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const messageTypes = [...new Set(messages.map(m => m.message_type).filter(Boolean))]
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800">
-      {/* Mobile Overlay */}
-      {sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-20 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+    <div className="flex h-screen bg-zinc-950">
+      {sidebarOpen && <div className="fixed inset-0 bg-black/60 z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      
+      {/* Modal */}
+      {selected && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-semibold">{selected.company}</h3>
+                <p className="text-zinc-500 text-sm">{selected.prospect_name} · {selected.message_type}</p>
+              </div>
+              <button onClick={() => setSelected(null)} className="text-zinc-500 hover:text-white">✕</button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-96">
+              <p className="text-white whitespace-pre-wrap">{selected.message}</p>
+            </div>
+            <div className="p-4 border-t border-zinc-800 flex items-center justify-between">
+              <span className="text-zinc-500 text-sm">{formatDate(selected.created_at)}</span>
+              <button onClick={() => copyMessage(selected.message)} className={`px-4 py-2 rounded-lg text-sm font-medium ${copied ? 'bg-emerald-500 text-white' : 'bg-yellow-400 text-zinc-900 hover:bg-yellow-300'}`}>
+                {copied ? '✓ Copied' : 'Copy Message'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-64 bg-slate-900/80 backdrop-blur-xl border-r border-slate-700/50 transition-all duration-300 z-30 h-full flex flex-col`}>
-        <div className="p-6 border-b border-slate-700/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg">
-              <span className="text-white font-bold">TS</span>
-            </div>
-            <div>
-              <h2 className="font-bold text-white">Tech-stack.io</h2>
-              <p className="text-xs text-slate-400">Outreach Engine</p>
-            </div>
+      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-56 bg-zinc-900 border-r border-zinc-800 z-30 h-full flex flex-col transition-transform`}>
+        <div className="p-4 border-b border-zinc-800">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center"><span className="text-zinc-900 font-black text-sm">TS</span></div>
+            <div><h2 className="font-bold text-white text-sm">Tech-stack.io</h2><p className="text-[10px] text-zinc-500">Outreach Engine</p></div>
           </div>
         </div>
-
-        <nav className="flex-1 p-4 space-y-2">
-          <Link href="/" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
-            <span className="text-xl">✨</span>
-            <span>Generate</span>
-          </Link>
-          <Link href="/bulk" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
-            <span className="text-xl">📦</span>
-            <span>Bulk Generate</span>
-          </Link>
-          <Link href="/saved" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
-            <span className="text-xl">💾</span>
-            <span>Saved Companies</span>
-          </Link>
-          <button className="w-full flex items-center gap-3 px-4 py-3 bg-blue-600 text-white rounded-xl font-medium shadow-lg">
-            <span className="text-xl">📊</span>
-            <span>History</span>
-          </button>
-          <Link href="/settings" className="w-full flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800/50 rounded-xl font-medium transition-all">
-            <span className="text-xl">⚙️</span>
-            <span>Settings</span>
-          </Link>
+        <nav className="flex-1 p-3 space-y-1">
+          <Link href="/" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">✨ Generate</Link>
+          <Link href="/bulk" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">📦 Bulk</Link>
+          <Link href="/saved" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">💾 Saved</Link>
+          <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">📊 History</button>
+          <Link href="/settings" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">⚙️ Settings</Link>
         </nav>
-
         <div className="p-4 border-t border-slate-700/50">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-900/30">
-            <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
-            <span className="text-xs text-slate-300">📊 {messages.length} messages</span>
-          </div>
-        </div>
+  <UserNav />
+</div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto w-full">
-        {/* Header */}
-        <header className="bg-slate-900/60 backdrop-blur-xl border-b border-slate-700/50 px-4 lg:px-8 py-4 sticky top-0 z-10">
-          <div className="flex items-center justify-between">
+      <main className="flex-1 overflow-auto">
+        <header className="bg-zinc-900/80 backdrop-blur border-b border-zinc-800 px-4 lg:px-6 py-3 sticky top-0 z-10">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <button 
-                onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 hover:bg-slate-800/50 rounded-xl text-white"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-              <div>
-                <h1 className="text-xl lg:text-2xl font-bold text-white">Message History</h1>
-                <p className="text-xs lg:text-sm text-slate-400 mt-1 hidden sm:block">View all generated messages</p>
-              </div>
+              <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1.5 text-zinc-400 hover:text-white">☰</button>
+              <h1 className="text-lg font-semibold text-white">Message History</h1>
+              <span className="text-xs text-zinc-500">{filtered.length} messages</span>
             </div>
-            <Link 
-              href="/"
-              className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500 font-medium text-sm shadow-lg transition-all"
-            >
-              + New Message
-            </Link>
+            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
+              <option value="">All Types</option>
+              {messageTypes.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
+          <input type="text" placeholder="Search company or prospect..." value={search} onChange={e => setSearch(e.target.value)} className="mt-3 w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm placeholder-zinc-600 focus:border-yellow-400" />
         </header>
 
-        {/* Content */}
-        <div className="p-4 lg:p-8">
-          <div className="max-w-7xl mx-auto space-y-6">
-            {/* Search Filter */}
-            <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-4">
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
-                <input
-                  type="text"
-                  placeholder="Search by name, company, or message type..."
-                  className="w-full pl-12 pr-4 py-3 bg-slate-900/50 border border-slate-600/50 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 text-white placeholder-slate-500"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                />
-              </div>
+        <div className="p-4 lg:p-6">
+          {loading ? (
+            <div className="flex justify-center py-12"><div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div></div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-16">
+              <span className="text-4xl block mb-3">📊</span>
+              <p className="text-white font-medium">No messages yet</p>
+              <p className="text-zinc-500 text-sm mt-1">Generate some messages to see history</p>
             </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-400 font-medium">Total Messages</p>
-                    <p className="text-3xl font-bold text-white mt-2">{messages.length}</p>
-                  </div>
-                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
-                    <span className="text-2xl">📝</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-400 font-medium">Companies Contacted</p>
-                    <p className="text-3xl font-bold text-white mt-2">
-                      {new Set(messages.map(m => m.company)).size}
-                    </p>
-                  </div>
-                  <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
-                    <span className="text-2xl">🏢</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-400 font-medium">This Week</p>
-                    <p className="text-3xl font-bold text-white mt-2">
-                      {messages.filter(m => {
-                        const weekAgo = new Date()
-                        weekAgo.setDate(weekAgo.getDate() - 7)
-                        return new Date(m.created_at) > weekAgo
-                      }).length}
-                    </p>
-                  </div>
-                  <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                    <span className="text-2xl">📅</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Messages List */}
-            {loading ? (
-              <div className="flex flex-col items-center justify-center h-64">
-                <div className="relative w-16 h-16">
-                  <div className="absolute inset-0 border-4 border-slate-700 rounded-full"></div>
-                  <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
-                </div>
-                <p className="text-white text-lg font-semibold mt-6">Loading history...</p>
-              </div>
-            ) : filteredMessages.length === 0 ? (
-              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-12 text-center">
-                <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-slate-700/50 flex items-center justify-center">
-                  <span className="text-4xl">📭</span>
-                </div>
-                <p className="text-white text-lg font-semibold mb-2">
-                  {filter ? 'No messages match your search' : 'No messages yet'}
-                </p>
-                <p className="text-slate-400 text-sm mb-6">
-                  {filter ? 'Try a different search term' : 'Generate your first message to see it here'}
-                </p>
-                {!filter && (
-                  <Link 
-                    href="/"
-                    className="inline-block px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-500 font-medium shadow-lg transition-all"
-                  >
-                    Generate Message
-                  </Link>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {filteredMessages.map((msg) => (
-                  <div key={msg.id} className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6 hover:border-slate-600/50 transition-all">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2 flex-wrap">
-                          <h3 className="text-lg font-bold text-white">{msg.prospect_name}</h3>
-                          <span className={`px-3 py-1 ${getMessageTypeColor(msg.message_type)} text-white text-xs rounded-full`}>
-                            {msg.message_type}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-400">
-                          {msg.prospect_title && <span>👤 {msg.prospect_title}</span>}
-                          <span>🏢 {msg.company}</span>
-                          {msg.industry && <span>🏭 {msg.industry}</span>}
-                          <span>🕒 {new Date(msg.created_at).toLocaleDateString()} {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                        </div>
+          ) : (
+            <div className="space-y-2">
+              {filtered.map(msg => (
+                <div key={msg.id} onClick={() => setSelected(msg)} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 cursor-pointer hover:border-zinc-700 transition-colors">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-white font-medium">{msg.company}</span>
+                        <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs rounded">{msg.message_type}</span>
                       </div>
-                      <button
-                        onClick={() => copyMessage(msg.generated_message, msg.id)}
-                        className={`px-4 py-2 rounded-xl font-medium text-sm flex items-center gap-2 transition-all ${
-                          copiedId === msg.id 
-                            ? 'bg-green-600 text-white' 
-                            : 'bg-slate-700/50 text-white hover:bg-slate-600/50'
-                        }`}
-                      >
-                        {copiedId === msg.id ? '✓ Copied' : '📋 Copy'}
-                      </button>
+                      <p className="text-zinc-500 text-sm">{msg.prospect_name} {msg.prospect_title && `· ${msg.prospect_title}`}</p>
+                      <p className="text-zinc-400 text-sm mt-2 line-clamp-2">{msg.message}</p>
                     </div>
-
-                    {msg.context && (
-                      <div className="mb-4 pb-4 border-b border-slate-700/50">
-                        <p className="text-xs font-semibold text-slate-400 mb-2">Context:</p>
-                        <p className="text-sm text-slate-300 line-clamp-2">{msg.context}</p>
+                    <div className="text-right flex-shrink-0">
+                      <div className={`text-lg font-bold ${msg.quality_score >= 80 ? 'text-emerald-400' : msg.quality_score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
+                        {msg.quality_score || '--'}
                       </div>
-                    )}
-
-                    <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4">
-                      <p className="text-white leading-relaxed whitespace-pre-wrap">
-                        {msg.generated_message}
-                      </p>
+                      <p className="text-zinc-600 text-xs">{formatDate(msg.created_at)}</p>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </main>
     </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import UserNav from '@/components/UserNav'
 
 interface LLMSettings {
   temperature: number
@@ -204,10 +205,7 @@ export default function Settings() {
             <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg">
               <span className="text-white font-bold">TS</span>
             </div>
-            <div>
-              <h2 className="font-bold text-white">Tech-stack.io</h2>
-              <p className="text-xs text-slate-400">Outreach Engine</p>
-            </div>
+        
           </div>
         </div>
 
@@ -233,6 +231,10 @@ export default function Settings() {
             <span>LLM Settings</span>
           </button>
         </nav>
+
+            <div className="p-4 border-t border-slate-700/50">
+  <UserNav />
+</div>
       </aside>
 
       {/* Main Content */}
