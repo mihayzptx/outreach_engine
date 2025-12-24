@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import UserNav from '@/components/UserNav'
-
 
 interface Settings {
   temperature: number
@@ -12,6 +10,7 @@ interface Settings {
   frequencyPenalty: number
   presencePenalty: number
   localModel: string
+  localEndpoint: string
   cloudModel: string
   systemPromptBase: string
   bannedPhrases: string[]
@@ -20,6 +19,11 @@ interface Settings {
   services: string[]
   idealCustomerSignals: string[]
   abmExamples: string[]
+  gradingCriteria: {
+    priority: { name: string; weight: number }[]
+    important: { name: string; weight: number }[]
+    bonus: { name: string; weight: number }[]
+  }
 }
 
 const defaultSettings: Settings = {
@@ -28,7 +32,8 @@ const defaultSettings: Settings = {
   topP: 0.9,
   frequencyPenalty: 0.3,
   presencePenalty: 0.3,
-  localModel: 'techstack-outreach',
+  localModel: 'llama3.2',
+  localEndpoint: 'http://localhost:11434',
   cloudModel: 'llama-3.3-70b-versatile',
   systemPromptBase: 'You write cold outreach for Tech-stack.io. Your messages are short, specific, and never generic.',
   bannedPhrases: [
@@ -78,14 +83,32 @@ const defaultSettings: Settings = {
     "Congrats on the Series B - exciting times ahead for {company}.",
     "Saw {name} mention the expansion plans. Impressive growth.",
     "The award recognition is well deserved. Strong way to finish the year."
-  ]
+  ],
+  gradingCriteria: {
+    priority: [
+      { name: 'Recent Funding', weight: 20 },
+      { name: 'Hiring DevOps/Platform', weight: 15 },
+      { name: 'Tech Stack Match', weight: 15 }
+    ],
+    important: [
+      { name: 'Growth Stage', weight: 10 },
+      { name: 'Industry Fit', weight: 10 },
+      { name: 'Company Size (50-500)', weight: 10 }
+    ],
+    bonus: [
+      { name: 'Recent News/PR', weight: 5 },
+      { name: 'Conference Attendance', weight: 5 },
+      { name: 'Engaged on LinkedIn', weight: 5 }
+    ]
+  }
+  ,
 }
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(defaultSettings)
   const [saved, setSaved] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples'>('model')
+  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'grading'>('model')
   const [newPhrase, setNewPhrase] = useState('')
   const [newOpener, setNewOpener] = useState('')
   const [newService, setNewService] = useState('')
@@ -150,9 +173,6 @@ export default function SettingsPage() {
           <Link href="/history" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">📊 History</Link>
           <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">⚙️ Settings</button>
         </nav>
-        <div className="p-4 border-t border-slate-700/50">
-  <UserNav />
-</div>
       </aside>
 
       {/* Main */}
@@ -173,18 +193,19 @@ export default function SettingsPage() {
         </header>
 
         {/* Tabs */}
-        <div className="border-b border-zinc-800 px-4 lg:px-6">
+        <div className="border-b border-zinc-800 px-4 lg:px-6 overflow-x-auto">
           <div className="flex gap-1">
             {[
               { id: 'model', label: '🤖 Model' },
               { id: 'prompts', label: '📝 Prompts' },
               { id: 'company', label: '🏢 Company' },
-              { id: 'examples', label: '💡 Examples' }
+              { id: 'examples', label: '💡 Examples' },
+              { id: 'grading', label: '📊 Grading' }
             ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.id ? 'text-yellow-400 border-yellow-400' : 'text-zinc-500 border-transparent hover:text-white'}`}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'text-yellow-400 border-yellow-400' : 'text-zinc-500 border-transparent hover:text-white'}`}
               >
                 {tab.label}
               </button>
@@ -202,13 +223,23 @@ export default function SettingsPage() {
                   <div>
                     <label className="text-xs text-zinc-500 block mb-1">Local Model (Ollama)</label>
                     <select value={settings.localModel} onChange={e => setSettings({...settings, localModel: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm">
-                      <option value="techstack-outreach">techstack-outreach (Custom)</option>
                       <option value="llama3.2">llama3.2</option>
                       <option value="llama3.1:8b">llama3.1:8b</option>
                       <option value="llama3.1:70b">llama3.1:70b</option>
                       <option value="mistral">mistral</option>
                       <option value="mixtral">mixtral</option>
+                      <option value="techstack-outreach">techstack-outreach (Custom)</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Ollama Endpoint</label>
+                    <input 
+                      type="text" 
+                      value={settings.localEndpoint} 
+                      onChange={e => setSettings({...settings, localEndpoint: e.target.value})} 
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      placeholder="http://localhost:11434"
+                    />
                   </div>
                   <div>
                     <label className="text-xs text-zinc-500 block mb-1">Cloud Model (Groq)</label>
@@ -220,6 +251,7 @@ export default function SettingsPage() {
                     </select>
                   </div>
                 </div>
+                <p className="text-[10px] text-zinc-600 mt-3">Run `ollama list` to see available models. Make sure Ollama is running.</p>
               </div>
 
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
@@ -421,6 +453,202 @@ export default function SettingsPage() {
                   <li>• Keep it short (1-2 sentences)</li>
                   <li>• End with warm closing, not a question</li>
                 </ul>
+              </div>
+            </>
+          )}
+
+          {/* Grading Tab */}
+          {activeTab === 'grading' && (
+            <>
+              <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl p-4 mb-6">
+                <h4 className="text-yellow-400 font-medium text-sm mb-2">📊 Lead Grading System</h4>
+                <p className="text-zinc-400 text-sm">Configure criteria and weights for automatic lead scoring. Total weight should equal 100 for accurate grading (A: 80+, B: 60-79, C: 40-59, D: 20-39, E: 0-19).</p>
+              </div>
+
+              {/* Priority Criteria */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">🔴 Priority Criteria</h3>
+                    <p className="text-xs text-zinc-500">High-impact signals (recommended 15-20 pts each)</p>
+                  </div>
+                  <button
+                    onClick={() => setSettings({
+                      ...settings,
+                      gradingCriteria: {
+                        ...settings.gradingCriteria,
+                        priority: [...settings.gradingCriteria.priority, { name: 'New Criteria', weight: 15 }]
+                      }
+                    })}
+                    className="px-3 py-1 bg-red-500/20 text-red-400 rounded-lg text-xs hover:bg-red-500/30"
+                  >
+                    + Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {settings.gradingCriteria.priority.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.priority]
+                          updated[i] = { ...item, name: e.target.value }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, priority: updated } })
+                        }}
+                        className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      />
+                      <input
+                        type="number"
+                        value={item.weight}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.priority]
+                          updated[i] = { ...item, weight: parseInt(e.target.value) || 0 }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, priority: updated } })
+                        }}
+                        className="w-16 px-2 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm text-center"
+                      />
+                      <span className="text-zinc-500 text-xs w-6">pts</span>
+                      <button
+                        onClick={() => {
+                          const updated = settings.gradingCriteria.priority.filter((_, idx) => idx !== i)
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, priority: updated } })
+                        }}
+                        className="text-zinc-500 hover:text-red-400"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Important Criteria */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">🟡 Important Criteria</h3>
+                    <p className="text-xs text-zinc-500">Medium-impact signals (recommended 10 pts each)</p>
+                  </div>
+                  <button
+                    onClick={() => setSettings({
+                      ...settings,
+                      gradingCriteria: {
+                        ...settings.gradingCriteria,
+                        important: [...settings.gradingCriteria.important, { name: 'New Criteria', weight: 10 }]
+                      }
+                    })}
+                    className="px-3 py-1 bg-yellow-500/20 text-yellow-400 rounded-lg text-xs hover:bg-yellow-500/30"
+                  >
+                    + Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {settings.gradingCriteria.important.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.important]
+                          updated[i] = { ...item, name: e.target.value }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, important: updated } })
+                        }}
+                        className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      />
+                      <input
+                        type="number"
+                        value={item.weight}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.important]
+                          updated[i] = { ...item, weight: parseInt(e.target.value) || 0 }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, important: updated } })
+                        }}
+                        className="w-16 px-2 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm text-center"
+                      />
+                      <span className="text-zinc-500 text-xs w-6">pts</span>
+                      <button
+                        onClick={() => {
+                          const updated = settings.gradingCriteria.important.filter((_, idx) => idx !== i)
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, important: updated } })
+                        }}
+                        className="text-zinc-500 hover:text-red-400"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bonus Criteria */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">🟢 Bonus Criteria</h3>
+                    <p className="text-xs text-zinc-500">Nice-to-have signals (recommended 5 pts each)</p>
+                  </div>
+                  <button
+                    onClick={() => setSettings({
+                      ...settings,
+                      gradingCriteria: {
+                        ...settings.gradingCriteria,
+                        bonus: [...settings.gradingCriteria.bonus, { name: 'New Criteria', weight: 5 }]
+                      }
+                    })}
+                    className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs hover:bg-emerald-500/30"
+                  >
+                    + Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {settings.gradingCriteria.bonus.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.bonus]
+                          updated[i] = { ...item, name: e.target.value }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, bonus: updated } })
+                        }}
+                        className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      />
+                      <input
+                        type="number"
+                        value={item.weight}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.bonus]
+                          updated[i] = { ...item, weight: parseInt(e.target.value) || 0 }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, bonus: updated } })
+                        }}
+                        className="w-16 px-2 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm text-center"
+                      />
+                      <span className="text-zinc-500 text-xs w-6">pts</span>
+                      <button
+                        onClick={() => {
+                          const updated = settings.gradingCriteria.bonus.filter((_, idx) => idx !== i)
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, bonus: updated } })
+                        }}
+                        className="text-zinc-500 hover:text-red-400"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Total Weight */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-zinc-400">Total Weight</span>
+                  {(() => {
+                    const total = 
+                      settings.gradingCriteria.priority.reduce((a, b) => a + b.weight, 0) +
+                      settings.gradingCriteria.important.reduce((a, b) => a + b.weight, 0) +
+                      settings.gradingCriteria.bonus.reduce((a, b) => a + b.weight, 0)
+                    return (
+                      <span className={`text-lg font-bold ${total === 100 ? 'text-emerald-400' : total > 100 ? 'text-red-400' : 'text-yellow-400'}`}>
+                        {total}/100
+                      </span>
+                    )
+                  })()}
+                </div>
               </div>
             </>
           )}

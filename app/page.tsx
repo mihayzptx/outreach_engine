@@ -37,7 +37,7 @@ function HomeContent() {
     prospectName: '', prospectTitle: '', company: '', industry: '', industryOther: '',
     context: '', messageType: 'LinkedIn Connection', messageHistory: '',
     messageLength: 'medium', toneOfVoice: 'professional', targetResult: '',
-    targetResultOther: '', sources: ''
+    targetResultOther: '', sources: '', customInstructions: ''
   })
   
   const [useLocal, setUseLocal] = useState(false)
@@ -56,12 +56,15 @@ function HomeContent() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [filteredSuggestions, setFilteredSuggestions] = useState<SavedCompany[]>([])
   const [user, setUser] = useState<{name: string, email: string, role: string} | null>(null)
+  const [campaigns, setCampaigns] = useState<{id: number, name: string, message_type: string, tone: string, length: string, context_template: string, target_goal: string, custom_instructions: string}[]>([])
+  const [selectedCampaign, setSelectedCampaign] = useState<number | null>(null)
   const suggestionRef = useRef<HTMLDivElement>(null)
   const searchParams = useSearchParams()
 
   useEffect(() => {
     fetch('/api/companies').then(r => r.json()).then(d => setSavedCompanies(d.companies || [])).catch(() => {})
     fetch('/api/auth/me').then(r => r.json()).then(d => { if (d.user) setUser(d.user) }).catch(() => {})
+    fetch('/api/campaigns').then(r => r.json()).then(d => setCampaigns(d.campaigns || [])).catch(() => {})
   }, [])
 
   const logout = async () => {
@@ -70,6 +73,21 @@ function HomeContent() {
   }
 
   useEffect(() => {
+    // Handle campaign params from URL
+    const campaignId = searchParams.get('campaignId')
+    if (campaignId) {
+      setSelectedCampaign(parseInt(campaignId))
+      setFormData(prev => ({
+        ...prev,
+        messageType: searchParams.get('messageType') || prev.messageType,
+        toneOfVoice: searchParams.get('tone') || prev.toneOfVoice,
+        messageLength: searchParams.get('length') || prev.messageLength,
+        context: searchParams.get('context') || prev.context,
+        targetResult: searchParams.get('targetGoal') || prev.targetResult,
+        customInstructions: searchParams.get('customInstructions') || ''
+      }))
+    }
+    // Handle company params from saved companies
     const company = searchParams.get('company')
     if (company) {
       setFormData(prev => ({
@@ -78,11 +96,29 @@ function HomeContent() {
         industry: searchParams.get('industry') || '',
         prospectName: searchParams.get('prospectName') || '',
         prospectTitle: searchParams.get('prospectTitle') || '',
-        context: searchParams.get('context') || '',
-        messageType: searchParams.get('messageType') || 'LinkedIn Connection'
+        context: searchParams.get('context') || prev.context,
+        messageType: searchParams.get('messageType') || prev.messageType
       }))
     }
   }, [searchParams])
+
+  const handleCampaignSelect = (campaignId: number | null) => {
+    setSelectedCampaign(campaignId)
+    if (campaignId) {
+      const campaign = campaigns.find(c => c.id === campaignId)
+      if (campaign) {
+        setFormData(prev => ({
+          ...prev,
+          messageType: campaign.message_type,
+          toneOfVoice: campaign.tone,
+          messageLength: campaign.length,
+          context: campaign.context_template || prev.context,
+          targetResult: campaign.target_goal || prev.targetResult,
+          customInstructions: campaign.custom_instructions || ''
+        }))
+      }
+    }
+  }
 
   useEffect(() => {
     if (formData.company.length > 1) {
@@ -127,17 +163,26 @@ function HomeContent() {
   const checkLocalModel = async () => {
     setCheckingModel(true)
     try {
-      const response = await fetch('/api/check-model')
+      const stored = localStorage.getItem('llm-settings')
+      const settings = stored ? JSON.parse(stored) : {}
+      const response = await fetch('/api/models/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          model: settings.localModel || 'llama3.2',
+          endpoint: settings.localEndpoint || 'http://localhost:11434'
+        })
+      })
       const data = await response.json()
       if (data.available) {
         setUseLocal(true)
         showToast('Connected to local model', 'success')
       } else {
-        showToast(`Local unavailable: ${data.error}`, 'error')
+        showToast(data.error || 'Local model not available', 'warning')
         setUseLocal(false)
       }
     } catch {
-      showToast('Cannot connect to local model', 'error')
+      showToast('Cannot connect to Ollama', 'error')
       setUseLocal(false)
     } finally {
       setCheckingModel(false)
@@ -168,7 +213,8 @@ function HomeContent() {
           ...formData,
           industry: getEffectiveIndustry(),
           targetResult: getEffectiveTargetResult(),
-          useLocal, useWebResearch, adjustment
+          useLocal, useWebResearch, adjustment,
+          campaignId: selectedCampaign
         })
       })
       
@@ -272,11 +318,12 @@ function HomeContent() {
       prospectName: '', prospectTitle: '', company: '', industry: '', industryOther: '',
       context: '', messageType: 'LinkedIn Connection', messageHistory: '',
       messageLength: 'medium', toneOfVoice: 'professional', targetResult: '',
-      targetResultOther: '', sources: ''
+      targetResultOther: '', sources: '', customInstructions: ''
     })
     setMessage('')
     setMetrics(null)
     setDisplayedSources([])
+    setSelectedCampaign(null)
   }
 
   const currentTargetResults = formData.messageType === 'ABM' ? ABM_TARGET_RESULTS : TARGET_RESULTS
@@ -317,6 +364,10 @@ function HomeContent() {
           </button>
           <Link href="/bulk" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
             <span>📦</span> Bulk
+          </Link>
+          <Link href="/campaigns" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
+            <span>🎯</span> Campaigns
+            {campaigns.length > 0 && <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded">{campaigns.length}</span>}
           </Link>
           <Link href="/saved" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
             <span>💾</span> Saved
@@ -378,6 +429,38 @@ function HomeContent() {
           <div className="grid lg:grid-cols-2 gap-6">
             {/* Form */}
             <div className="space-y-4">
+              {/* Campaign Selector */}
+              {campaigns.length > 0 && (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Campaign</h3>
+                    {selectedCampaign && (
+                      <button 
+                        onClick={() => handleCampaignSelect(null)}
+                        className="text-[10px] text-zinc-500 hover:text-white"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={selectedCampaign || ''}
+                    onChange={(e) => handleCampaignSelect(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  >
+                    <option value="">No campaign (manual settings)</option>
+                    {campaigns.map(c => (
+                      <option key={c.id} value={c.id}>🎯 {c.name}</option>
+                    ))}
+                  </select>
+                  {selectedCampaign && (
+                    <p className="text-[10px] text-zinc-600 mt-2">
+                      Settings loaded from campaign. Prospect-specific context will be added below.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Prospect Info */}
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
                 <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Prospect</h3>
@@ -610,8 +693,8 @@ function HomeContent() {
               {/* Quick Adjustments */}
               {message && (
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                  <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Quick Adjust</h3>
-                  <div className="flex flex-wrap gap-2">
+                  <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Regenerate</h3>
+                  <div className="flex flex-wrap gap-2 mb-3">
                     {['Shorter', 'Longer', 'More casual', 'More direct', 'Add question'].map(adj => (
                       <button
                         key={adj}
@@ -622,6 +705,32 @@ function HomeContent() {
                         {adj}
                       </button>
                     ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Custom instruction... e.g. 'Focus on their recent funding'"
+                      className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
+                          handleSubmit(e, (e.target as HTMLInputElement).value);
+                          (e.target as HTMLInputElement).value = ''
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={(e) => {
+                        const input = (e.target as HTMLElement).previousElementSibling as HTMLInputElement
+                        if (input?.value.trim()) {
+                          handleSubmit(e, input.value)
+                          input.value = ''
+                        }
+                      }}
+                      disabled={loading}
+                      className="px-4 py-2 bg-yellow-400 text-zinc-900 text-sm font-medium rounded-lg hover:bg-yellow-300 disabled:opacity-50 transition-colors"
+                    >
+                      Apply
+                    </button>
                   </div>
                 </div>
               )}
