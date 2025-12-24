@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import UserNav from '@/components/UserNav'
 
 interface Message {
   id: number
@@ -99,9 +98,6 @@ export default function HistoryPage() {
           <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">📊 History</button>
           <Link href="/settings" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">⚙️ Settings</Link>
         </nav>
-        <div className="p-4 border-t border-slate-700/50">
-  <UserNav />
-</div>
       </aside>
 
       <main className="flex-1 overflow-auto">

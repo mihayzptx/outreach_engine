@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import UserNav from '@/components/UserNav'
 
 const LABEL_COLORS: Record<string, string> = {
   'Hot Lead': 'bg-red-500', 'Warm': 'bg-orange-500', 'Nurture': 'bg-amber-500',
@@ -497,9 +496,6 @@ export default function SavedPage() {
             <span>⚙️</span> Settings
           </Link>
         </nav>
-            <div className="p-4 border-t border-slate-700/50">
-  <UserNav />
-</div>
       </aside>
 
       {/* Main */}

@@ -3,7 +3,6 @@
 import { useState, useEffect, Suspense, useRef } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import UserNav from '@/components/UserNav'
 
 const INDUSTRIES = [
   'SaaS / Software', 'FinTech', 'Healthcare Tech', 'E-commerce', 'Manufacturing',
@@ -323,10 +322,6 @@ function HomeContent() {
             <span>⚙️</span> Settings
           </Link>
         </nav>
-        <div className="p-4 border-t border-slate-700/50">
-  <UserNav />
-</div>
-        
         
         {/* User section placeholder */}
         <div className="p-3 border-t border-zinc-800">
