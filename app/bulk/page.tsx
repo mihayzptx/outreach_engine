@@ -26,6 +26,7 @@ export default function BulkPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [messageType, setMessageType] = useState('LinkedIn Connection')
   const [useWebResearch, setUseWebResearch] = useState(false)
+  const [generalContext, setGeneralContext] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -71,7 +72,14 @@ export default function BulkPage() {
       try {
         const res = await fetch('/api/outreach', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...leads[i], messageType, useWebResearch, messageLength: 'medium', toneOfVoice: 'professional' })
+          body: JSON.stringify({ 
+            ...leads[i], 
+            context: generalContext ? `${generalContext}\n\n${leads[i].context}` : leads[i].context,
+            messageType, 
+            useWebResearch, 
+            messageLength: 'medium', 
+            toneOfVoice: 'professional' 
+          })
         })
         const data = await res.json()
         setMessages(prev => prev.map((m, idx) => idx === i ? { ...m, message: data.message, status: 'done' } : m))
@@ -94,7 +102,7 @@ export default function BulkPage() {
     a.click()
   }
 
-  const clearAll = () => { setLeads([]); setMessages([]); setProgress(0); if (fileInputRef.current) fileInputRef.current.value = '' }
+  const clearAll = () => { setLeads([]); setMessages([]); setProgress(0); setGeneralContext(''); if (fileInputRef.current) fileInputRef.current.value = '' }
 
   return (
     <div className="flex h-screen bg-zinc-950">
@@ -144,7 +152,7 @@ export default function BulkPage() {
               <div>
                 <label className="text-xs text-zinc-500 block mb-1">Message Type</label>
                 <select value={messageType} onChange={e => setMessageType(e.target.value)} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm">
-                  <option>LinkedIn Connection</option><option>LinkedIn Message</option><option>Cold Email</option><option>Follow-up Email</option><option>ABM</option>
+                  <option>LinkedIn Connection</option><option>LinkedIn Message</option><option>Cold Email</option><option>Follow-up Email</option><option>Response</option><option>ABM</option>
                 </select>
               </div>
               <div className="flex items-end">
@@ -153,6 +161,15 @@ export default function BulkPage() {
                   <span className="text-sm">🔍 Web Research</span>
                 </label>
               </div>
+            </div>
+            <div className="mt-4">
+              <label className="text-xs text-zinc-500 block mb-1">General Context (applies to all leads)</label>
+              <textarea
+                value={generalContext}
+                onChange={e => setGeneralContext(e.target.value)}
+                placeholder="Add context that applies to all leads... e.g. campaign theme, common pain points, your value prop..."
+                className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm h-20 resize-none focus:border-yellow-400"
+              />
             </div>
           </div>
 

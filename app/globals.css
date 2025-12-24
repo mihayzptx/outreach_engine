@@ -1,35 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 :root {
-  /* Yellow accent */
-  --yellow-50: #fefce8;
-  --yellow-100: #fef9c3;
-  --yellow-200: #fef08a;
-  --yellow-300: #fde047;
   --yellow-400: #facc15;
   --yellow-500: #eab308;
-  --yellow-600: #ca8a04;
-  
-  /* Greys */
-  --gray-50: #fafafa;
-  --gray-100: #f4f4f5;
-  --gray-200: #e4e4e7;
-  --gray-300: #d4d4d8;
-  --gray-400: #a1a1aa;
-  --gray-500: #71717a;
-  --gray-600: #52525b;
-  --gray-700: #3f3f46;
   --gray-800: #27272a;
-  --gray-850: #1f1f23;
   --gray-900: #18181b;
   --gray-950: #09090b;
 }
 
 body {
   background-color: var(--gray-950);
-  color: var(--gray-100);
+  color: #f4f4f5;
 }
 
 /* Custom scrollbar */
@@ -43,12 +24,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--gray-700);
+  background: var(--gray-800);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--gray-600);
+  background: #3f3f46;
 }
 
 /* Focus styles */

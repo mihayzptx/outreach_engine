@@ -55,12 +55,19 @@ function HomeContent() {
   const [savedCompanies, setSavedCompanies] = useState<SavedCompany[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [filteredSuggestions, setFilteredSuggestions] = useState<SavedCompany[]>([])
+  const [user, setUser] = useState<{name: string, email: string, role: string} | null>(null)
   const suggestionRef = useRef<HTMLDivElement>(null)
   const searchParams = useSearchParams()
 
   useEffect(() => {
     fetch('/api/companies').then(r => r.json()).then(d => setSavedCompanies(d.companies || [])).catch(() => {})
+    fetch('/api/auth/me').then(r => r.json()).then(d => { if (d.user) setUser(d.user) }).catch(() => {})
   }, [])
+
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    window.location.href = '/login'
+  }
 
   useEffect(() => {
     const company = searchParams.get('company')
@@ -323,11 +330,28 @@ function HomeContent() {
           </Link>
         </nav>
         
-        {/* User section placeholder */}
-        <div className="p-3 border-t border-zinc-800">
-          <Link href="/admin" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>👤</span> Admin
-          </Link>
+        {/* User section */}
+        <div className="p-3 border-t border-zinc-800 space-y-2">
+          {user?.role === 'admin' && (
+            <Link href="/admin" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
+              <span>👥</span> Admin
+            </Link>
+          )}
+          {user ? (
+            <div className="flex items-center justify-between px-3 py-2 bg-zinc-800/50 rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-yellow-400/20 flex items-center justify-center text-xs text-yellow-400 font-medium">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-xs text-zinc-300 truncate max-w-[80px]">{user.name}</span>
+              </div>
+              <button onClick={logout} className="text-[10px] text-zinc-500 hover:text-white transition-colors">Logout</button>
+            </div>
+          ) : (
+            <Link href="/login" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
+              <span>🔑</span> Login
+            </Link>
+          )}
         </div>
       </aside>
 
@@ -449,6 +473,7 @@ function HomeContent() {
                       <option>LinkedIn Message</option>
                       <option>Cold Email</option>
                       <option>Follow-up Email</option>
+                      <option>Response</option>
                       <option>ABM</option>
                     </select>
                   </div>
@@ -489,6 +514,20 @@ function HomeContent() {
                     </select>
                   </div>
                 </div>
+
+                {/* Message History (for Response type) */}
+                {formData.messageType === 'Response' && (
+                  <div className="mt-3">
+                    <label className="block text-xs text-zinc-400 mb-1">Conversation History</label>
+                    <textarea
+                      value={formData.messageHistory}
+                      onChange={(e) => setFormData({...formData, messageHistory: e.target.value})}
+                      placeholder="Paste the conversation thread here..."
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm h-24 resize-none focus:border-yellow-400"
+                    />
+                    <p className="text-[10px] text-zinc-600 mt-1">Include their message so AI can craft appropriate response</p>
+                  </div>
+                )}
               </div>
 
               {/* Toggles */}
