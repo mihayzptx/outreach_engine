@@ -199,10 +199,20 @@ export default function CampaignsPage() {
       if (!p.company) continue
       
       try {
+        // Get signal settings from localStorage
+        let signalSettings = null
+        try {
+          const stored = localStorage.getItem('llm-settings')
+          if (stored) {
+            const settings = JSON.parse(stored)
+            signalSettings = settings.signalSettings
+          }
+        } catch {}
+        
         const res = await fetch('/api/companies/refresh', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ company_id: 0, company_name: p.company, industry: '' })
+          body: JSON.stringify({ company_id: 0, company_name: p.company, industry: '', signalSettings })
         })
         const data = await res.json()
         

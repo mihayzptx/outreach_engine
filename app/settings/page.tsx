@@ -24,6 +24,18 @@ interface Settings {
     important: { name: string; weight: number }[]
     bonus: { name: string; weight: number }[]
   }
+  signalSettings: {
+    timeframeDays: number
+    enabledSignals: string[]
+    signalPatterns: {
+      category: string
+      label: string
+      icon: string
+      priority: 'high' | 'medium' | 'low'
+      keywords: string[]
+      enabled: boolean
+    }[]
+  }
 }
 
 const defaultSettings: Settings = {
@@ -100,6 +112,20 @@ const defaultSettings: Settings = {
       { name: 'Conference Attendance', weight: 5 },
       { name: 'Engaged on LinkedIn', weight: 5 }
     ]
+  },
+  signalSettings: {
+    timeframeDays: 90,
+    enabledSignals: ['funding', 'hiring', 'leadership', 'expansion', 'acquisition', 'awards', 'product', 'tech_stack'],
+    signalPatterns: [
+      { category: 'funding', label: 'Funding', icon: '💰', priority: 'high', keywords: ['raised', 'funding', 'series', 'seed', 'investment', 'venture', 'capital', 'million', 'billion'], enabled: true },
+      { category: 'hiring', label: 'Hiring', icon: '👥', priority: 'high', keywords: ['hiring', 'job', 'career', 'engineer', 'devops', 'platform', 'sre', 'infrastructure', 'growing team'], enabled: true },
+      { category: 'leadership', label: 'Leadership', icon: '👔', priority: 'medium', keywords: ['appoint', 'hire', 'promote', 'cto', 'ceo', 'vp', 'chief', 'head of', 'joins', 'new role'], enabled: true },
+      { category: 'expansion', label: 'Expansion', icon: '🌍', priority: 'medium', keywords: ['expand', 'office', 'location', 'market', 'international', 'global', 'launch', 'new region'], enabled: true },
+      { category: 'acquisition', label: 'M&A', icon: '🤝', priority: 'high', keywords: ['acquire', 'acquisition', 'merger', 'merge', 'bought', 'purchase', 'deal'], enabled: true },
+      { category: 'awards', label: 'Awards', icon: '🏆', priority: 'low', keywords: ['award', 'win', 'recognized', 'ranked', 'best', 'top', 'fastest', 'inc 500', 'forbes'], enabled: true },
+      { category: 'product', label: 'Product', icon: '🚀', priority: 'medium', keywords: ['launch', 'announce', 'release', 'product', 'feature', 'platform', 'new version'], enabled: true },
+      { category: 'tech_stack', label: 'Tech Stack', icon: '⚙️', priority: 'medium', keywords: ['aws', 'azure', 'gcp', 'kubernetes', 'k8s', 'terraform', 'docker', 'devops', 'ci/cd', 'jenkins'], enabled: true }
+    ]
   }
 }
 
@@ -107,7 +133,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(defaultSettings)
   const [saved, setSaved] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'grading' | 'integrations'>('model')
+  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'grading' | 'signals' | 'integrations'>('model')
   const [newPhrase, setNewPhrase] = useState('')
   const [newOpener, setNewOpener] = useState('')
   const [newService, setNewService] = useState('')
@@ -200,6 +226,7 @@ export default function SettingsPage() {
               { id: 'company', label: '🏢 Company' },
               { id: 'examples', label: '💡 Examples' },
               { id: 'grading', label: '📊 Grading' },
+              { id: 'signals', label: '🔔 Signals' },
               { id: 'integrations', label: '🔗 Integrations' }
             ].map(tab => (
               <button
@@ -648,6 +675,197 @@ export default function SettingsPage() {
                       </span>
                     )
                   })()}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Signals Tab */}
+          {activeTab === 'signals' && (
+            <>
+              {/* Timeframe Setting */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Signal Timeframe</h3>
+                <p className="text-zinc-500 text-sm mb-4">Only show signals from news and events within this timeframe.</p>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <label className="text-xs text-zinc-500 block mb-1">Days to look back</label>
+                    <input 
+                      type="number" 
+                      min="7" 
+                      max="365"
+                      value={settings.signalSettings?.timeframeDays || 90}
+                      onChange={e => setSettings({
+                        ...settings,
+                        signalSettings: {
+                          ...settings.signalSettings,
+                          timeframeDays: parseInt(e.target.value) || 90
+                        }
+                      })}
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    {[30, 60, 90, 180].map(days => (
+                      <button
+                        key={days}
+                        onClick={() => setSettings({
+                          ...settings,
+                          signalSettings: { ...settings.signalSettings, timeframeDays: days }
+                        })}
+                        className={`px-3 py-2 rounded-lg text-sm ${
+                          settings.signalSettings?.timeframeDays === days 
+                            ? 'bg-yellow-400 text-zinc-900' 
+                            : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {days}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Signal Types */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Signal Types</h3>
+                <p className="text-zinc-500 text-sm mb-4">Enable or disable signal categories and adjust their priority.</p>
+                
+                <div className="space-y-3">
+                  {(settings.signalSettings?.signalPatterns || []).map((signal, idx) => (
+                    <div key={signal.category} className={`p-4 rounded-lg border ${signal.enabled ? 'bg-zinc-950 border-zinc-700' : 'bg-zinc-950/50 border-zinc-800 opacity-60'}`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl">{signal.icon}</span>
+                          <div>
+                            <h4 className="text-white font-medium">{signal.label}</h4>
+                            <p className="text-zinc-500 text-xs">{signal.category}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <select
+                            value={signal.priority}
+                            onChange={e => {
+                              const updated = [...settings.signalSettings.signalPatterns]
+                              updated[idx] = { ...updated[idx], priority: e.target.value as 'high' | 'medium' | 'low' }
+                              setSettings({ ...settings, signalSettings: { ...settings.signalSettings, signalPatterns: updated } })
+                            }}
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              signal.priority === 'high' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                              signal.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                              'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                            } border`}
+                          >
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                          </select>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={signal.enabled}
+                              onChange={e => {
+                                const updated = [...settings.signalSettings.signalPatterns]
+                                updated[idx] = { ...updated[idx], enabled: e.target.checked }
+                                setSettings({ ...settings, signalSettings: { ...settings.signalSettings, signalPatterns: updated } })
+                              }}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-400"></div>
+                          </label>
+                        </div>
+                      </div>
+                      
+                      {/* Keywords */}
+                      <div>
+                        <label className="text-xs text-zinc-500 block mb-2">Keywords (comma-separated)</label>
+                        <input
+                          type="text"
+                          value={signal.keywords.join(', ')}
+                          onChange={e => {
+                            const updated = [...settings.signalSettings.signalPatterns]
+                            updated[idx] = { ...updated[idx], keywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean) }
+                            setSettings({ ...settings, signalSettings: { ...settings.signalSettings, signalPatterns: updated } })
+                          }}
+                          className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm"
+                          placeholder="keyword1, keyword2, keyword3"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Add Custom Signal */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Add Custom Signal</h3>
+                <div className="grid grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Category</label>
+                    <input type="text" id="newSignalCategory" placeholder="custom_signal" className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Label</label>
+                    <input type="text" id="newSignalLabel" placeholder="Custom Signal" className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Icon</label>
+                    <input type="text" id="newSignalIcon" placeholder="🔔" className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">&nbsp;</label>
+                    <button
+                      onClick={() => {
+                        const category = (document.getElementById('newSignalCategory') as HTMLInputElement).value.trim().toLowerCase().replace(/\s+/g, '_')
+                        const label = (document.getElementById('newSignalLabel') as HTMLInputElement).value.trim()
+                        const icon = (document.getElementById('newSignalIcon') as HTMLInputElement).value.trim() || '🔔'
+                        if (category && label) {
+                          const newSignal = { category, label, icon, priority: 'medium' as const, keywords: [], enabled: true }
+                          setSettings({
+                            ...settings,
+                            signalSettings: {
+                              ...settings.signalSettings,
+                              signalPatterns: [...settings.signalSettings.signalPatterns, newSignal]
+                            }
+                          })
+                          ;(document.getElementById('newSignalCategory') as HTMLInputElement).value = ''
+                          ;(document.getElementById('newSignalLabel') as HTMLInputElement).value = ''
+                          ;(document.getElementById('newSignalIcon') as HTMLInputElement).value = ''
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium hover:bg-yellow-300"
+                    >
+                      + Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Signal Priority Legend */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Priority Guide</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                      <span className="text-red-400 font-medium text-sm">High Priority</span>
+                    </div>
+                    <p className="text-zinc-500 text-xs">Immediate buying signals. Contact ASAP.</p>
+                  </div>
+                  <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                      <span className="text-yellow-400 font-medium text-sm">Medium Priority</span>
+                    </div>
+                    <p className="text-zinc-500 text-xs">Good engagement opportunity. Add to sequence.</p>
+                  </div>
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                      <span className="text-blue-400 font-medium text-sm">Low Priority</span>
+                    </div>
+                    <p className="text-zinc-500 text-xs">Nice to know. Use for personalization.</p>
+                  </div>
                 </div>
               </div>
             </>

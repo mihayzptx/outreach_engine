@@ -60,6 +60,26 @@ interface Company {
   signal_count?: number
   is_archived?: boolean
   archived_at?: string
+  extracted_info?: {
+    description?: string
+    founded?: string
+    headquarters?: string
+    employeeCount?: string
+    techStack?: string[]
+    competitors?: string[]
+    fundingTotal?: string
+    lastRound?: string
+    lastRoundAmount?: string
+    lastRoundDate?: string
+    investors?: string[]
+    keyPeople?: { name: string; title: string; linkedin?: string }[]
+    painPoints?: string[]
+    outreachAngles?: string[]
+    icpScore?: number
+    icpReasons?: string[]
+    icpConcerns?: string[]
+    researchedAt?: string
+  }
   created_at: string
   updated_at: string
 }
@@ -80,6 +100,7 @@ export default function SavedPage() {
   const [researchingAll, setResearchingAll] = useState(false)
   const [researchProgress, setResearchProgress] = useState({ current: 0, total: 0 })
   const [showArchived, setShowArchived] = useState(false)
+  const [signalDebug, setSignalDebug] = useState<any>(null)
   const router = useRouter()
 
   useEffect(() => { fetchCompanies() }, [])
@@ -126,47 +147,73 @@ export default function SavedPage() {
 
   const refreshCompany = async (id: number, name: string, industry: string) => {
     setRefreshing(id)
+    setSignalDebug(null)
     try {
-      const res = await fetch('/api/companies/refresh', {
+      // Get settings from localStorage
+      let companyProfile = ''
+      try {
+        const stored = localStorage.getItem('llm-settings')
+        if (stored) {
+          const settings = JSON.parse(stored)
+          companyProfile = settings.companyDescription || ''
+        }
+      } catch {}
+      
+      // Use deep research for comprehensive analysis
+      const res = await fetch('/api/companies/deep-research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: id, company_name: name, industry }),
+        body: JSON.stringify({ 
+          company_id: id, 
+          company_name: name, 
+          industry, 
+          companyProfile 
+        }),
         cache: 'no-store'
       })
       const data = await res.json()
-      console.log('Refresh response:', data)
+      console.log('Deep research response:', data)
+      
+      // Store debug info for display
+      setSignalDebug({ 
+        stats: data.stats, 
+        progress: data.progress,
+        errors: data.errors,
+        research: data.research,
+        timestamp: new Date().toISOString() 
+      })
       
       if (data.success) {
-        // Fetch fresh data from database with cache bust
+        // Fetch fresh data from database
         const companiesRes = await fetch('/api/companies?t=' + Date.now(), { cache: 'no-store' })
         const companiesData = await companiesRes.json()
         const freshCompanies = companiesData.companies || []
-        console.log('Fresh companies fetched:', freshCompanies.length)
         
         setCompanies(freshCompanies)
         
         // Update selected with fresh data
         const updatedCompany = freshCompanies.find((c: Company) => c.id === id)
         if (updatedCompany) {
-          console.log('Updated company:', updatedCompany)
           setSelected(updatedCompany)
-          // Also update grading form if on grading tab
+          // Auto-fill grading from research
+          const info = data.research || {}
           setGradingForm({
-            buyerIntent: updatedCompany.buyer_intent || updatedCompany.grading_data?.buyerIntent,
-            activelyHiring: updatedCompany.is_hiring || updatedCompany.grading_data?.activelyHiring,
-            fundingStage: updatedCompany.funding_stage || updatedCompany.grading_data?.fundingStage,
-            fundingAmount: updatedCompany.funding_amount || updatedCompany.grading_data?.fundingAmount,
-            revenueRange: updatedCompany.revenue_range || updatedCompany.grading_data?.revenueRange,
-            companySize: updatedCompany.employee_count || updatedCompany.grading_data?.companySize,
-            geography: updatedCompany.country || updatedCompany.grading_data?.geography,
-            yearFounded: updatedCompany.founded_year || updatedCompany.grading_data?.yearFounded
+            buyerIntent: info.signals?.some((s: any) => s.category === 'funding'),
+            activelyHiring: info.signals?.some((s: any) => s.category === 'hiring'),
+            fundingStage: info.fundingHistory?.lastRound !== 'unknown' ? info.fundingHistory?.lastRound : undefined,
+            fundingAmount: info.fundingHistory?.lastRoundAmount !== 'unknown' ? info.fundingHistory?.lastRoundAmount : undefined,
+            companySize: info.companyInfo?.employeeCount !== 'unknown' ? info.companyInfo?.employeeCount : undefined,
+            geography: info.companyInfo?.headquarters !== 'unknown' ? info.companyInfo?.headquarters : undefined,
+            yearFounded: info.companyInfo?.founded !== 'unknown' ? info.companyInfo?.founded : undefined,
+            industry: info.companyInfo?.industry || industry
           })
         }
       } else {
-        console.error('Refresh failed:', data.error)
+        console.error('Research failed:', data.error)
       }
     } catch (e) {
-      console.error('Refresh error:', e)
+      console.error('Research error:', e)
+      setSignalDebug({ errors: [(e as Error).message] })
     }
     finally { setRefreshing(null) }
   }
@@ -189,11 +236,30 @@ export default function SavedPage() {
   }
 
   const researchAllCompanies = async () => {
-    const toResearch = companies.filter(c => !c.signal_data || c.signal_count === 0)
+    // Research all companies without signal data OR all if forced
+    const toResearch = companies.filter(c => !c.is_archived && (!c.signal_data || c.signal_count === 0 || !c.extracted_info))
     if (toResearch.length === 0) {
-      alert('All companies already have research data')
+      if (confirm('All companies already have research. Re-scan all?')) {
+        // Re-scan all non-archived
+        const allActive = companies.filter(c => !c.is_archived)
+        if (allActive.length === 0) return
+        await runResearchBatch(allActive)
+      }
       return
     }
+    await runResearchBatch(toResearch)
+  }
+
+  const runResearchBatch = async (toResearch: Company[]) => {
+    // Get settings
+    let companyProfile = ''
+    try {
+      const stored = localStorage.getItem('llm-settings')
+      if (stored) {
+        const settings = JSON.parse(stored)
+        companyProfile = settings.companyDescription || ''
+      }
+    } catch {}
     
     setResearchingAll(true)
     setResearchProgress({ current: 0, total: toResearch.length })
@@ -201,15 +267,27 @@ export default function SavedPage() {
     for (let i = 0; i < toResearch.length; i++) {
       const c = toResearch[i]
       try {
-        await fetch('/api/companies/refresh', {
+        const res = await fetch('/api/companies/deep-research', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ company_id: c.id, company_name: c.company_name, industry: c.industry })
+          body: JSON.stringify({ 
+            company_id: c.id, 
+            company_name: c.company_name, 
+            industry: c.industry,
+            companyProfile
+          })
         })
+        const data = await res.json()
+        console.log(`Research ${i + 1}/${toResearch.length}: ${c.company_name}`, data.success ? '✓' : '✗')
       } catch (e) {
-        console.error('Research failed for', c.company_name)
+        console.error('Research failed for', c.company_name, e)
       }
       setResearchProgress({ current: i + 1, total: toResearch.length })
+      
+      // Small delay between requests to avoid rate limits
+      if (i < toResearch.length - 1) {
+        await new Promise(r => setTimeout(r, 500))
+      }
     }
     
     await fetchCompanies()
@@ -280,10 +358,34 @@ export default function SavedPage() {
     setActiveTab('overview')
   }
 
-  const goToGenerate = (c: Company) => {
+  const goToGenerate = (c: Company, signal?: any) => {
+    let context = c.last_context || ''
+    
+    // If signal provided, use it as context
+    if (signal) {
+      context = `${signal.label}: ${signal.detail}. ${signal.title || ''}`
+    }
+    
     const params = new URLSearchParams({
-      company: c.company_name, industry: c.industry || '', prospectName: c.last_prospect_name || '',
-      prospectTitle: c.last_prospect_title || '', context: c.last_context || '', messageType: c.last_message_type || 'LinkedIn Connection'
+      company: c.company_name, 
+      industry: c.industry || '', 
+      prospectName: c.last_prospect_name || '',
+      prospectTitle: c.last_prospect_title || '', 
+      context: context, 
+      messageType: c.last_message_type || 'LinkedIn Connection'
+    })
+    router.push(`/?${params.toString()}`)
+  }
+
+  const goToGenerateWithSignal = (c: Company, signal: any) => {
+    const context = `${signal.label}: ${signal.detail}. Source: ${signal.title || signal.source}`
+    const params = new URLSearchParams({
+      company: c.company_name,
+      industry: c.industry || '',
+      prospectName: c.last_prospect_name || '',
+      prospectTitle: c.last_prospect_title || '',
+      context: context,
+      messageType: signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection'
     })
     router.push(`/?${params.toString()}`)
   }
@@ -478,7 +580,15 @@ export default function SavedPage() {
                                 {s.priority}
                               </span>
                             )}
-                            {s.publishedDate && <span className="text-xs text-zinc-500 ml-auto">{formatDate(s.publishedDate)}</span>}
+                            <div className="ml-auto flex items-center gap-2">
+                              {s.publishedDate && <span className="text-xs text-zinc-500">{formatDate(s.publishedDate)}</span>}
+                              <button 
+                                onClick={() => goToGenerateWithSignal(selected, s)}
+                                className="px-2 py-1 bg-yellow-400/20 text-yellow-400 rounded text-xs hover:bg-yellow-400/30"
+                              >
+                                ✉️ Use
+                              </button>
+                            </div>
                           </div>
                           <p className="text-white text-sm font-medium">{s.detail || s.title}</p>
                           {s.content && <p className="text-zinc-400 text-xs mt-1 line-clamp-2">{s.content}</p>}
@@ -490,77 +600,121 @@ export default function SavedPage() {
                     <div className="text-center py-12 text-zinc-600">
                       <span className="text-3xl block mb-2">🔔</span>
                       <p>No signals yet</p>
-                      <p className="text-xs mt-1">Click "Scan Signals" to search</p>
+                      <p className="text-xs mt-1">Click &quot;Scan Signals&quot; to search</p>
+                    </div>
+                  )}
+
+                  {/* Debug Panel */}
+                  {signalDebug && (
+                    <div className="mt-4 p-3 bg-zinc-950 border border-zinc-800 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-zinc-500">SCAN DEBUG</span>
+                        <button onClick={() => setSignalDebug(null)} className="text-xs text-zinc-600 hover:text-white">✕</button>
+                      </div>
+                      
+                      {/* Stats */}
+                      {signalDebug.stats && (
+                        <div className="grid grid-cols-5 gap-2 mb-3">
+                          <div className="text-center p-2 bg-zinc-900 rounded">
+                            <p className="text-lg font-bold text-white">{signalDebug.stats.sourcesSearched || signalDebug.stats.queriesRun || 0}</p>
+                            <p className="text-[10px] text-zinc-500">Searches</p>
+                          </div>
+                          <div className="text-center p-2 bg-zinc-900 rounded">
+                            <p className="text-lg font-bold text-white">{signalDebug.stats.sourcesFound || signalDebug.stats.rawResults || 0}</p>
+                            <p className="text-[10px] text-zinc-500">Sources</p>
+                          </div>
+                          <div className="text-center p-2 bg-zinc-900 rounded">
+                            <p className="text-lg font-bold text-emerald-400">{signalDebug.stats.signalsExtracted || 0}</p>
+                            <p className="text-[10px] text-zinc-500">Signals</p>
+                          </div>
+                          <div className="text-center p-2 bg-zinc-900 rounded">
+                            <p className="text-lg font-bold text-blue-400">{signalDebug.stats.peopleFound || 0}</p>
+                            <p className="text-[10px] text-zinc-500">People</p>
+                          </div>
+                          <div className="text-center p-2 bg-zinc-900 rounded">
+                            <p className={`text-lg font-bold ${(signalDebug.stats.icpScore || 0) >= 70 ? 'text-emerald-400' : (signalDebug.stats.icpScore || 0) >= 50 ? 'text-yellow-400' : 'text-zinc-400'}`}>
+                              {signalDebug.stats.icpScore || '-'}
+                            </p>
+                            <p className="text-[10px] text-zinc-500">ICP Fit</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Research insights */}
+                      {signalDebug.research && (
+                        <div className="space-y-2 mb-3">
+                          {signalDebug.research.companyInfo?.description && (
+                            <div className="p-2 bg-zinc-900 rounded">
+                              <p className="text-[10px] text-zinc-500 mb-1">ABOUT</p>
+                              <p className="text-xs text-zinc-300">{signalDebug.research.companyInfo.description}</p>
+                            </div>
+                          )}
+                          {signalDebug.research.painPoints?.length > 0 && (
+                            <div className="p-2 bg-emerald-950/30 border border-emerald-900/50 rounded">
+                              <p className="text-[10px] text-emerald-400 mb-1">PAIN POINTS</p>
+                              <div className="flex flex-wrap gap-1">
+                                {signalDebug.research.painPoints.slice(0, 4).map((p: string, i: number) => (
+                                  <span key={i} className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] rounded">{p}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {signalDebug.research.outreachAngles?.length > 0 && (
+                            <div className="p-2 bg-yellow-950/30 border border-yellow-900/50 rounded">
+                              <p className="text-[10px] text-yellow-400 mb-1">OUTREACH ANGLES</p>
+                              <div className="space-y-1">
+                                {signalDebug.research.outreachAngles.slice(0, 3).map((a: string, i: number) => (
+                                  <p key={i} className="text-xs text-yellow-300">• {a}</p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {signalDebug.research.keyPeople?.length > 0 && (
+                            <div className="p-2 bg-blue-950/30 border border-blue-900/50 rounded">
+                              <p className="text-[10px] text-blue-400 mb-1">KEY PEOPLE</p>
+                              <div className="space-y-1">
+                                {signalDebug.research.keyPeople.slice(0, 3).map((p: any, i: number) => (
+                                  <p key={i} className="text-xs text-blue-300">{p.name} - {p.title}</p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Errors */}
+                      {signalDebug.errors?.length > 0 && (
+                        <div className="mb-3 p-2 bg-red-500/10 border border-red-500/30 rounded">
+                          <p className="text-xs text-red-400 font-medium mb-1">Errors:</p>
+                          {signalDebug.errors.map((e: string, i: number) => (
+                            <p key={i} className="text-xs text-red-300">{e}</p>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Progress steps */}
+                      {signalDebug.progress?.length > 0 && (
+                        <div>
+                          <p className="text-xs text-zinc-500 mb-1">Progress:</p>
+                          <div className="space-y-0.5">
+                            {signalDebug.progress.map((p: string, i: number) => (
+                              <p key={i} className="text-[10px] text-zinc-400">✓ {p}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
               )}
 
               {activeTab === 'grading' && (
-                <div className="space-y-4">
-                  {/* High Priority */}
-                  <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-lg p-3">
-                    <p className="text-xs font-medium text-emerald-400 mb-3">HIGH PRIORITY (3x)</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="flex items-center gap-2 bg-zinc-950 p-2 rounded cursor-pointer">
-                        <input type="checkbox" checked={gradingForm.buyerIntent || false} onChange={e => setGradingForm({...gradingForm, buyerIntent: e.target.checked})} className="rounded" />
-                        <span className="text-sm text-white">Buyer Intent</span>
-                      </label>
-                      <label className="flex items-center gap-2 bg-zinc-950 p-2 rounded cursor-pointer">
-                        <input type="checkbox" checked={gradingForm.activelyHiring || false} onChange={e => setGradingForm({...gradingForm, activelyHiring: e.target.checked})} className="rounded" />
-                        <span className="text-sm text-white">Actively Hiring</span>
-                      </label>
-                      <div>
-                        <label className="text-[10px] text-zinc-500 block mb-1">Funding Stage</label>
-                        <select value={gradingForm.fundingStage || ''} onChange={e => setGradingForm({...gradingForm, fundingStage: e.target.value})} className="w-full px-2 py-1.5 bg-zinc-950 border border-zinc-800 rounded text-white text-sm">
-                          <option value="">Select...</option>
-                          {FUNDING_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-zinc-500 block mb-1">Revenue Range</label>
-                        <select value={gradingForm.revenueRange || ''} onChange={e => setGradingForm({...gradingForm, revenueRange: e.target.value})} className="w-full px-2 py-1.5 bg-zinc-950 border border-zinc-800 rounded text-white text-sm">
-                          <option value="">Select...</option>
-                          {REVENUE_RANGES.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Medium Priority */}
-                  <div className="bg-blue-950/30 border border-blue-900/50 rounded-lg p-3">
-                    <p className="text-xs font-medium text-blue-400 mb-3">MEDIUM PRIORITY (2x)</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10px] text-zinc-500 block mb-1">Company Size</label>
-                        <select value={gradingForm.companySize || ''} onChange={e => setGradingForm({...gradingForm, companySize: e.target.value})} className="w-full px-2 py-1.5 bg-zinc-950 border border-zinc-800 rounded text-white text-sm">
-                          <option value="">Select...</option>
-                          {COMPANY_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-zinc-500 block mb-1">Geography</label>
-                        <select value={gradingForm.geography || ''} onChange={e => setGradingForm({...gradingForm, geography: e.target.value})} className="w-full px-2 py-1.5 bg-zinc-950 border border-zinc-800 rounded text-white text-sm">
-                          <option value="">Select...</option>
-                          {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Low Priority */}
-                  <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3">
-                    <p className="text-xs font-medium text-zinc-500 mb-3">LOW PRIORITY (1x)</p>
-                    <div>
-                      <label className="text-[10px] text-zinc-500 block mb-1">Year Founded</label>
-                      <input type="number" value={gradingForm.yearFounded || ''} onChange={e => setGradingForm({...gradingForm, yearFounded: parseInt(e.target.value) || undefined})} placeholder="2015" className="w-full px-2 py-1.5 bg-zinc-950 border border-zinc-800 rounded text-white text-sm" />
-                    </div>
-                  </div>
-
-                  <button onClick={saveGrading} className="w-full py-2.5 bg-yellow-400 text-zinc-900 rounded-lg font-semibold hover:bg-yellow-300">
-                    Calculate & Save Grade
-                  </button>
-                </div>
+                <GradingTab 
+                  selected={selected} 
+                  gradingForm={gradingForm} 
+                  setGradingForm={setGradingForm}
+                  saveGrading={saveGrading}
+                />
               )}
 
               {activeTab === 'links' && (
@@ -588,8 +742,8 @@ export default function SavedPage() {
 
             {/* Modal Footer */}
             <div className="p-4 border-t border-zinc-800 flex gap-2">
-              <button onClick={() => refreshCompany(selected.id, selected.company_name, selected.industry)} disabled={refreshing === selected.id} className="px-4 py-2 bg-zinc-800 text-white rounded-lg text-sm hover:bg-zinc-700 disabled:opacity-50">
-                {refreshing === selected.id ? '⏳ Scanning...' : '🔍 Scan Signals'}
+              <button onClick={() => refreshCompany(selected.id, selected.company_name, selected.industry)} disabled={refreshing === selected.id} className="px-4 py-2 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg text-sm hover:bg-purple-500/30 disabled:opacity-50">
+                {refreshing === selected.id ? '⏳ Researching...' : '🔬 Deep Research'}
               </button>
               <button onClick={() => { setSelected(null); goToGenerate(selected) }} className="flex-1 px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold hover:bg-yellow-300">
                 ✉️ Generate Message
@@ -631,6 +785,12 @@ export default function SavedPage() {
           </Link>
           <Link href="/bulk" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
             <span>📦</span> Bulk
+          </Link>
+          <Link href="/campaigns" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
+            <span>🎯</span> Campaigns
+          </Link>
+          <Link href="/prospect" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
+            <span>🔍</span> Prospect
           </Link>
           <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">
             <span>💾</span> Saved
@@ -752,6 +912,347 @@ export default function SavedPage() {
           )}
         </div>
       </main>
+    </div>
+  )
+}
+
+// Grading Tab Component with AI Suggestions
+function GradingTab({ selected, gradingForm, setGradingForm, saveGrading }: any) {
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestion, setSuggestion] = useState<any>(null)
+
+  // Scoring constants from grading system
+  const FUNDING_DATE_SCORES: Record<string, number> = { '0-1m': 5, '2-6m': 4, '6m-1y': 3, '1y-3y': 2.5, '3y-5y': 1, '>5y': 0 }
+  const FUNDING_STAGE_SCORES: Record<string, number> = { 'Seed': 3, 'Series A': 5, 'Series B': 5, 'Series C': 4, 'Private Equity': 4, 'Series D+': 3, 'IPO': 2 }
+  const FUNDING_AMOUNT_SCORES: Record<string, number> = { '<100k': 0, '100k-500k': 1, '500k-2m': 5, '2m-5m': 5, '5m-20m': 4, '>20m': 3 }
+  const REVENUE_SCORES: Record<string, number> = { '<1m': 0, '1m-10m': 5, '10m-50m': 5, '50m-100m': 3, '100m-500m': 2, '>500m': 1 }
+  const COMPANY_SIZE_SCORES: Record<string, number> = { '1-10': 3, '11-50': 5, '51-200': 5, '201-500': 5, '501-1000': 4, '1001-5000': 3, '5000+': 2 }
+  const GEOGRAPHY_SCORES: Record<string, number> = {
+    'United States': 5, 'United Kingdom': 5, 'Canada': 5,
+    'Australia': 4, 'Ireland': 4, 'Israel': 4, 'Netherlands': 4, 'Singapore': 4, 'Sweden': 4, 'Switzerland': 4, 'UAE': 4,
+    'Germany': 3, 'France': 3, 'Belgium': 3, 'Austria': 3,
+    'Spain': 2, 'Italy': 2, 'Portugal': 2, 'Other': 1
+  }
+  const TITLE_SCORES: Record<string, number> = {
+    'CxO Tech': 5, 'CxO Leadership': 5, 'CxO Operations': 4,
+    'VP Tech': 5, 'VP Operations': 4, 'Director Tech': 5, 'Director Operations': 4,
+    'Head Tech': 5, 'Head Operations': 4, 'Manager': 3, 'Other': 2
+  }
+  const INDUSTRY_SCORES: Record<string, number> = { 'Tech/SaaS': 5, 'Fintech': 5, 'Data/Analytics': 5, 'Manufacturing': 4, 'Healthcare': 3, 'Services': 2, 'Other': 1 }
+  const CONNECTIONS_SCORES: Record<string, number> = { '<100': 0, '100-300': 2, '300-500': 4, '500+': 5 }
+  const YEARS_POSITION_SCORES: Record<string, number> = { '<1': 2, '1-2': 5, '2-4': 3, '4+': 1 }
+  const YEARS_COMPANY_SCORES: Record<string, number> = { '<1': 3, '1-3': 5, '3-6': 3, '6+': 1 }
+  const YEAR_FOUNDED_SCORES: Record<string, number> = { '<3': 1, '3-5': 3, '5-15': 5, '15-30': 3, '30+': 1 }
+
+  const calculateScore = () => {
+    let totalScore = 0
+    let maxScore = 0
+    let filledCount = 0
+    const totalCriteria = 14 // Total number of grading criteria
+
+    // HIGH PRIORITY (k=3)
+    if (gradingForm.buyerIntent !== undefined && gradingForm.buyerIntent !== null) { totalScore += (gradingForm.buyerIntent ? 5 : 0) * 3; maxScore += 15; filledCount++ }
+    if (gradingForm.activelyHiring !== undefined && gradingForm.activelyHiring !== null) { totalScore += (gradingForm.activelyHiring ? 5 : 0) * 3; maxScore += 15; filledCount++ }
+    if (gradingForm.lastFundingDate) { totalScore += (FUNDING_DATE_SCORES[gradingForm.lastFundingDate] || 0) * 3; maxScore += 15; filledCount++ }
+    if (gradingForm.fundingStage) { totalScore += (FUNDING_STAGE_SCORES[gradingForm.fundingStage] || 0) * 3; maxScore += 15; filledCount++ }
+    if (gradingForm.fundingAmount) { totalScore += (FUNDING_AMOUNT_SCORES[gradingForm.fundingAmount] || 0) * 3; maxScore += 15; filledCount++ }
+    if (gradingForm.revenueRange) { totalScore += (REVENUE_SCORES[gradingForm.revenueRange] || 0) * 3; maxScore += 15; filledCount++ }
+    if (gradingForm.titleCategory) { totalScore += (TITLE_SCORES[gradingForm.titleCategory] || 0) * 3; maxScore += 15; filledCount++ }
+
+    // MEDIUM PRIORITY (k=2)
+    if (gradingForm.companySize) { totalScore += (COMPANY_SIZE_SCORES[gradingForm.companySize] || 0) * 2; maxScore += 10; filledCount++ }
+    if (gradingForm.industry) { totalScore += (INDUSTRY_SCORES[gradingForm.industry] || 0) * 2; maxScore += 10; filledCount++ }
+    if (gradingForm.geography) { totalScore += (GEOGRAPHY_SCORES[gradingForm.geography] || 0) * 2; maxScore += 10; filledCount++ }
+
+    // LOW PRIORITY (k=1)
+    if (gradingForm.connections) { totalScore += (CONNECTIONS_SCORES[gradingForm.connections] || 0) * 1; maxScore += 5; filledCount++ }
+    if (gradingForm.yearsPosition) { totalScore += (YEARS_POSITION_SCORES[gradingForm.yearsPosition] || 0) * 1; maxScore += 5; filledCount++ }
+    if (gradingForm.yearsCompany) { totalScore += (YEARS_COMPANY_SCORES[gradingForm.yearsCompany] || 0) * 1; maxScore += 5; filledCount++ }
+    if (gradingForm.yearFounded) { totalScore += (YEAR_FOUNDED_SCORES[gradingForm.yearFounded] || 0) * 1; maxScore += 5; filledCount++ }
+
+    const normalized = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0
+    const dataCompleteness = Math.round((filledCount / totalCriteria) * 100)
+    const isLowData = dataCompleteness < 50
+    
+    return { 
+      score: normalized, 
+      filled: filledCount, 
+      total: totalCriteria,
+      completeness: dataCompleteness,
+      isLowData,
+      grade: normalized >= 81 ? 'A' : normalized >= 61 ? 'B' : normalized >= 41 ? 'C' : normalized >= 21 ? 'D' : 'E' 
+    }
+  }
+
+  const getSuggestion = async () => {
+    if (!selected) return
+    setSuggesting(true)
+    try {
+      let companyProfile = ''
+      try { const stored = localStorage.getItem('llm-settings'); if (stored) companyProfile = JSON.parse(stored).companyDescription || '' } catch {}
+      
+      const res = await fetch('/api/grading/suggest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company: selected, companyProfile })
+      })
+      const data = await res.json()
+      if (data.success && data.suggestion) {
+        const s = data.suggestion
+        setSuggestion(s)
+        // Auto-fill from AI
+        if (s.scoringData) {
+          setGradingForm({
+            ...gradingForm,
+            buyerIntent: s.scoringData.buyerIntent || gradingForm.buyerIntent,
+            activelyHiring: s.scoringData.activelyHiring || gradingForm.activelyHiring,
+            fundingStage: s.scoringData.fundingStage !== 'unknown' ? s.scoringData.fundingStage : gradingForm.fundingStage,
+            companySize: s.scoringData.companySize !== 'unknown' ? s.scoringData.companySize : gradingForm.companySize,
+            geography: s.scoringData.geography !== 'unknown' ? s.scoringData.geography : gradingForm.geography
+          })
+        }
+      }
+    } catch (e) { console.error('Suggestion failed:', e) }
+    setSuggesting(false)
+  }
+
+  const { score, filled, total, completeness, isLowData, grade } = calculateScore()
+
+  return (
+    <div className="space-y-3">
+      {/* Score Display */}
+      <div className={`rounded-lg p-3 flex items-center justify-between ${isLowData ? 'bg-red-950/30 border border-red-500/30' : 'bg-zinc-800'}`}>
+        <div>
+          <span className="text-zinc-400 text-xs">Lead Score</span>
+          <div className="text-2xl font-bold text-white">{score}<span className="text-sm text-zinc-500">/100</span></div>
+          <div className="flex items-center gap-2 mt-1">
+            <div className="w-20 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${completeness >= 50 ? 'bg-emerald-500' : 'bg-red-500'}`} style={{ width: `${completeness}%` }} />
+            </div>
+            <span className={`text-[10px] ${isLowData ? 'text-red-400' : 'text-zinc-500'}`}>{filled}/{total} fields</span>
+          </div>
+        </div>
+        <div className="text-center">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${
+            isLowData ? 'bg-zinc-700 ring-2 ring-red-500' :
+            grade === 'A' ? 'bg-emerald-500' : grade === 'B' ? 'bg-blue-500' : grade === 'C' ? 'bg-yellow-500 text-zinc-900' : grade === 'D' ? 'bg-orange-500' : 'bg-red-500'
+          }`}>{grade}</div>
+          {isLowData && <span className="text-[10px] text-red-400 mt-1 block">Low data</span>}
+        </div>
+      </div>
+
+      {/* Low data warning */}
+      {isLowData && (
+        <div className="p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+          <p className="text-xs text-red-400">⚠️ Less than 50% of criteria filled. Grade may be unreliable.</p>
+          <p className="text-[10px] text-red-300 mt-1">Run &quot;Deep Research&quot; to auto-fill more fields.</p>
+        </div>
+      )}
+
+      {/* AI Suggestion */}
+      <button onClick={getSuggestion} disabled={suggesting} className="w-full py-2 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg text-sm font-medium hover:bg-purple-500/30 disabled:opacity-50">
+        {suggesting ? '🔄 Analyzing...' : '🤖 Auto-Fill with AI'}
+      </button>
+
+      {suggestion && (
+        <div className="bg-purple-950/30 border border-purple-900/50 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-purple-400">AI Score: {suggestion.score}/100</span>
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${suggestion.suggestedGrade === 'A' ? 'bg-emerald-500' : suggestion.suggestedGrade === 'B' ? 'bg-blue-500' : 'bg-yellow-500 text-zinc-900'}`}>
+              {suggestion.suggestedGrade}
+            </span>
+          </div>
+          {suggestion.painPoints?.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {suggestion.painPoints.slice(0,3).map((p: string, i: number) => (
+                <span key={i} className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-[10px] rounded">{p}</span>
+              ))}
+            </div>
+          )}
+          {suggestion.outreachAngle && <p className="text-zinc-400 text-xs">{suggestion.outreachAngle}</p>}
+        </div>
+      )}
+
+      {/* HIGH PRIORITY (k=3) */}
+      <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-lg p-3">
+        <p className="text-xs font-medium text-emerald-400 mb-2">HIGH PRIORITY (×3)</p>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex items-center gap-2 bg-zinc-950 p-2 rounded cursor-pointer text-sm">
+            <input type="checkbox" checked={gradingForm.buyerIntent || false} onChange={e => setGradingForm({...gradingForm, buyerIntent: e.target.checked})} className="rounded" />
+            <span className="text-white">Buyer Intent</span>
+          </label>
+          <label className="flex items-center gap-2 bg-zinc-950 p-2 rounded cursor-pointer text-sm">
+            <input type="checkbox" checked={gradingForm.activelyHiring || false} onChange={e => setGradingForm({...gradingForm, activelyHiring: e.target.checked})} className="rounded" />
+            <span className="text-white">Actively Hiring</span>
+          </label>
+          <div>
+            <label className="text-[10px] text-zinc-500">Last Funding Date</label>
+            <select value={gradingForm.lastFundingDate || ''} onChange={e => setGradingForm({...gradingForm, lastFundingDate: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">Select...</option>
+              <option value="0-1m">0-1 months (5)</option>
+              <option value="2-6m">2-6 months (4)</option>
+              <option value="6m-1y">6m-1 year (3)</option>
+              <option value="1y-3y">1-3 years (2.5)</option>
+              <option value="3y-5y">3-5 years (1)</option>
+              <option value=">5y">&gt;5 years (0)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500">Funding Stage</label>
+            <select value={gradingForm.fundingStage || ''} onChange={e => setGradingForm({...gradingForm, fundingStage: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">Select...</option>
+              <option value="Series A">Series A (5)</option>
+              <option value="Series B">Series B (5)</option>
+              <option value="Series C">Series C (4)</option>
+              <option value="Private Equity">Private Equity (4)</option>
+              <option value="Seed">Seed (3)</option>
+              <option value="Series D+">Series D+ (3)</option>
+              <option value="IPO">IPO/Public (2)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500">Funding Amount</label>
+            <select value={gradingForm.fundingAmount || ''} onChange={e => setGradingForm({...gradingForm, fundingAmount: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">Select...</option>
+              <option value="500k-2m">$500K-$2M (5)</option>
+              <option value="2m-5m">$2M-$5M (5)</option>
+              <option value="5m-20m">$5M-$20M (4)</option>
+              <option value=">20m">&gt;$20M (3)</option>
+              <option value="100k-500k">$100K-$500K (1)</option>
+              <option value="<100k">&lt;$100K (0)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500">Revenue Range</label>
+            <select value={gradingForm.revenueRange || ''} onChange={e => setGradingForm({...gradingForm, revenueRange: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">Select...</option>
+              <option value="1m-10m">$1M-$10M (5)</option>
+              <option value="10m-50m">$10M-$50M (5)</option>
+              <option value="50m-100m">$50M-$100M (3)</option>
+              <option value="100m-500m">$100M-$500M (2)</option>
+              <option value=">500m">&gt;$500M (1)</option>
+              <option value="<1m">&lt;$1M (0)</option>
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="text-[10px] text-zinc-500">Title Category</label>
+            <select value={gradingForm.titleCategory || ''} onChange={e => setGradingForm({...gradingForm, titleCategory: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">Select...</option>
+              <option value="CxO Tech">CxO + Technology (5)</option>
+              <option value="CxO Leadership">CxO + Leadership (5)</option>
+              <option value="VP Tech">VP + Technology (5)</option>
+              <option value="Director Tech">Director + Technology (5)</option>
+              <option value="Head Tech">Head + Technology (5)</option>
+              <option value="CxO Operations">CxO + Operations (4)</option>
+              <option value="VP Operations">VP + Operations (4)</option>
+              <option value="Director Operations">Director + Operations (4)</option>
+              <option value="Manager">Manager (3)</option>
+              <option value="Other">Other (2)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* MEDIUM PRIORITY (k=2) */}
+      <div className="bg-blue-950/30 border border-blue-900/50 rounded-lg p-3">
+        <p className="text-xs font-medium text-blue-400 mb-2">MEDIUM PRIORITY (×2)</p>
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <label className="text-[10px] text-zinc-500">Company Size</label>
+            <select value={gradingForm.companySize || ''} onChange={e => setGradingForm({...gradingForm, companySize: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">Select...</option>
+              <option value="11-50">11-50 (5)</option>
+              <option value="51-200">51-200 (5)</option>
+              <option value="201-500">201-500 (5)</option>
+              <option value="501-1000">501-1000 (4)</option>
+              <option value="1-10">1-10 (3)</option>
+              <option value="1001-5000">1001-5000 (3)</option>
+              <option value="5000+">5000+ (2)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500">Industry</label>
+            <select value={gradingForm.industry || ''} onChange={e => setGradingForm({...gradingForm, industry: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">Select...</option>
+              <option value="Tech/SaaS">Tech/SaaS (5)</option>
+              <option value="Fintech">Fintech (5)</option>
+              <option value="Data/Analytics">Data/Analytics (5)</option>
+              <option value="Manufacturing">Manufacturing (4)</option>
+              <option value="Healthcare">Healthcare (3)</option>
+              <option value="Services">Services (2)</option>
+              <option value="Other">Other (1)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500">Geography</label>
+            <select value={gradingForm.geography || ''} onChange={e => setGradingForm({...gradingForm, geography: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">Select...</option>
+              <option value="United States">United States (5)</option>
+              <option value="United Kingdom">United Kingdom (5)</option>
+              <option value="Canada">Canada (5)</option>
+              <option value="Australia">Australia (4)</option>
+              <option value="Israel">Israel (4)</option>
+              <option value="Netherlands">Netherlands (4)</option>
+              <option value="Singapore">Singapore (4)</option>
+              <option value="Germany">Germany (3)</option>
+              <option value="France">France (3)</option>
+              <option value="Spain">Spain (2)</option>
+              <option value="Other">Other (1)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* LOW PRIORITY (k=1) */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3">
+        <p className="text-xs font-medium text-zinc-500 mb-2">LOW PRIORITY (×1)</p>
+        <div className="grid grid-cols-4 gap-2">
+          <div>
+            <label className="text-[10px] text-zinc-500">Connections</label>
+            <select value={gradingForm.connections || ''} onChange={e => setGradingForm({...gradingForm, connections: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">...</option>
+              <option value="500+">500+ (5)</option>
+              <option value="300-500">300-500 (4)</option>
+              <option value="100-300">100-300 (2)</option>
+              <option value="<100">&lt;100 (0)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500">Yrs Position</label>
+            <select value={gradingForm.yearsPosition || ''} onChange={e => setGradingForm({...gradingForm, yearsPosition: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">...</option>
+              <option value="1-2">1-2 (5)</option>
+              <option value="2-4">2-4 (3)</option>
+              <option value="<1">&lt;1 (2)</option>
+              <option value="4+">4+ (1)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500">Yrs Company</label>
+            <select value={gradingForm.yearsCompany || ''} onChange={e => setGradingForm({...gradingForm, yearsCompany: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">...</option>
+              <option value="1-3">1-3 (5)</option>
+              <option value="<1">&lt;1 (3)</option>
+              <option value="3-6">3-6 (3)</option>
+              <option value="6+">6+ (1)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-500">Founded</label>
+            <select value={gradingForm.yearFounded || ''} onChange={e => setGradingForm({...gradingForm, yearFounded: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
+              <option value="">...</option>
+              <option value="5-15">5-15y (5)</option>
+              <option value="3-5">3-5y (3)</option>
+              <option value="15-30">15-30y (3)</option>
+              <option value="<3">&lt;3y (1)</option>
+              <option value="30+">30+y (1)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <button onClick={saveGrading} className="w-full py-2.5 bg-yellow-400 text-zinc-900 rounded-lg font-semibold hover:bg-yellow-300">
+        Save Grade ({grade}) - {filled} criteria filled
+      </button>
     </div>
   )
 }

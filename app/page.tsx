@@ -224,7 +224,38 @@ function HomeContent() {
       
       const data = await response.json()
       setMessage(data.message)
-      setMetrics(data.metrics)
+      
+      // Run quality check
+      if (data.message) {
+        setLoadingStep('Checking quality...')
+        try {
+          const qualityRes = await fetch('/api/quality/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: data.message,
+              messageType: formData.messageType,
+              prospectName: formData.prospectName,
+              company: formData.company
+            })
+          })
+          const qualityData = await qualityRes.json()
+          if (qualityData.success) {
+            setMetrics({
+              ...data.metrics,
+              ...qualityData.quality,
+              charCount: data.message.length,
+              wordCount: data.message.split(/\s+/).length
+            })
+          } else {
+            setMetrics(data.metrics)
+          }
+        } catch {
+          setMetrics(data.metrics)
+        }
+      } else {
+        setMetrics(data.metrics)
+      }
       
       if (formData.sources.trim()) {
         setDisplayedSources(formData.sources.split('\n').map(s => s.trim()).filter(s => s))
@@ -692,47 +723,113 @@ function HomeContent() {
                 )}
               </div>
 
-              {/* Metrics */}
+              {/* Quality Analysis */}
               {metrics && (
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                  <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Metrics</h3>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Quality Analysis</h3>
+                    <div className={`px-3 py-1 rounded-full text-sm font-bold ${
+                      metrics.grade === 'A' ? 'bg-emerald-500' : 
+                      metrics.grade === 'B' ? 'bg-blue-500' : 
+                      metrics.grade === 'C' ? 'bg-yellow-500 text-zinc-900' : 
+                      metrics.grade === 'D' ? 'bg-orange-500' : 'bg-red-500'
+                    }`}>
+                      {metrics.grade} ({metrics.overallScore})
+                    </div>
+                  </div>
+                  
+                  {/* Criteria bars */}
+                  <div className="space-y-2 mb-4">
+                    {metrics.criteria?.map((c: any, i: number) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-xs text-zinc-400 w-24 truncate">{c.name}</span>
+                        <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full ${c.score >= 80 ? 'bg-emerald-500' : c.score >= 60 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                            style={{ width: `${c.score}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-zinc-500 w-20 truncate">{c.feedback}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Warnings */}
+                  {metrics.warnings?.length > 0 && (
+                    <div className="mb-3 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                      {metrics.warnings.map((w: string, i: number) => (
+                        <p key={i} className="text-xs text-red-400">⚠️ {w}</p>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Suggestions */}
+                  {metrics.suggestions?.length > 0 && (
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-zinc-500">SUGGESTIONS:</span>
+                      {metrics.suggestions.map((s: string, i: number) => (
+                        <button
+                          key={i}
+                          onClick={(e) => handleSubmit(e, s)}
+                          disabled={loading}
+                          className="block w-full text-left px-2 py-1.5 text-xs text-zinc-300 bg-zinc-800 rounded hover:bg-zinc-700 disabled:opacity-50"
+                        >
+                          💡 {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Stats row */}
+                  <div className="flex gap-4 mt-3 pt-3 border-t border-zinc-800">
                     <div className="text-center">
-                      <p className="text-xl font-bold text-white">{metrics.charCount}</p>
-                      <p className="text-xs text-zinc-500">Characters</p>
+                      <p className="text-lg font-bold text-white">{metrics.charCount}</p>
+                      <p className="text-[10px] text-zinc-500">chars</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-xl font-bold text-white">{metrics.wordCount}</p>
-                      <p className="text-xs text-zinc-500">Words</p>
+                      <p className="text-lg font-bold text-white">{metrics.wordCount}</p>
+                      <p className="text-[10px] text-zinc-500">words</p>
                     </div>
                     <div className="text-center">
-                      <p className={`text-xl font-bold ${metrics.qualityScore >= 80 ? 'text-emerald-400' : metrics.qualityScore >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>{metrics.qualityScore}</p>
-                      <p className="text-xs text-zinc-500">Quality</p>
+                      <p className="text-lg font-bold text-white">{Math.ceil(metrics.wordCount / 200)}</p>
+                      <p className="text-[10px] text-zinc-500">min read</p>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Quick Adjustments */}
+              {/* Adjustments Panel */}
               {message && (
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                  <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Regenerate</h3>
+                  <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Adjust Message</h3>
+                  
+                  {/* Quick adjustments */}
                   <div className="flex flex-wrap gap-2 mb-3">
-                    {['Shorter', 'Longer', 'More casual', 'More direct', 'Add question'].map(adj => (
+                    {['Shorter', 'Longer', 'More casual', 'More formal', 'More direct', 'Softer tone', 'Add question', 'Remove fluff'].map(adj => (
                       <button
                         key={adj}
                         onClick={(e) => handleSubmit(e, adj)}
                         disabled={loading}
-                        className="px-3 py-1.5 bg-zinc-800 text-zinc-300 text-sm rounded-lg hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                        className="px-3 py-1.5 bg-zinc-800 text-zinc-300 text-xs rounded-lg hover:bg-zinc-700 disabled:opacity-50"
                       >
                         {adj}
                       </button>
                     ))}
                   </div>
+
+                  {/* Specific fixes */}
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <button onClick={(e) => handleSubmit(e, 'Remove generic phrases')} disabled={loading} className="px-2 py-1 bg-orange-500/20 text-orange-400 text-xs rounded hover:bg-orange-500/30 disabled:opacity-50">Fix clichés</button>
+                    <button onClick={(e) => handleSubmit(e, 'Improve opening line - dont start with I')} disabled={loading} className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded hover:bg-blue-500/30 disabled:opacity-50">Fix opening</button>
+                    <button onClick={(e) => handleSubmit(e, 'Add soft call to action question at the end')} disabled={loading} className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded hover:bg-purple-500/30 disabled:opacity-50">Add CTA</button>
+                    <button onClick={(e) => handleSubmit(e, 'Make more personalized with specific details')} disabled={loading} className="px-2 py-1 bg-emerald-500/20 text-emerald-400 text-xs rounded hover:bg-emerald-500/30 disabled:opacity-50">Personalize</button>
+                  </div>
+                  
+                  {/* Custom instruction */}
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Custom instruction... e.g. 'Focus on their recent funding'"
+                      placeholder="Custom adjustment... e.g., 'Focus on their recent funding'"
                       className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
@@ -750,11 +847,20 @@ function HomeContent() {
                         }
                       }}
                       disabled={loading}
-                      className="px-4 py-2 bg-yellow-400 text-zinc-900 text-sm font-medium rounded-lg hover:bg-yellow-300 disabled:opacity-50 transition-colors"
+                      className="px-4 py-2 bg-yellow-400 text-zinc-900 text-sm font-medium rounded-lg hover:bg-yellow-300 disabled:opacity-50"
                     >
                       Apply
                     </button>
                   </div>
+
+                  {/* Regenerate fresh */}
+                  <button
+                    onClick={(e) => { setMessage(''); handleSubmit(e) }}
+                    disabled={loading}
+                    className="w-full mt-3 py-2 bg-zinc-800 text-zinc-400 text-sm rounded-lg hover:bg-zinc-700 hover:text-white disabled:opacity-50"
+                  >
+                    🔄 Regenerate from scratch
+                  </button>
                 </div>
               )}
 
