@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense, useRef } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import EmailModal from '@/components/EmailModal'
 
 const INDUSTRIES = [
   'SaaS / Software', 'FinTech', 'Healthcare Tech', 'E-commerce', 'Manufacturing',
@@ -58,6 +59,8 @@ function HomeContent() {
   const [user, setUser] = useState<{name: string, email: string, role: string} | null>(null)
   const [campaigns, setCampaigns] = useState<{id: number, name: string, message_type: string, tone: string, length: string, context_template: string, target_goal: string, custom_instructions: string}[]>([])
   const [selectedCampaign, setSelectedCampaign] = useState<number | null>(null)
+  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [gmailConnected, setGmailConnected] = useState(false)
   const suggestionRef = useRef<HTMLDivElement>(null)
   const searchParams = useSearchParams()
 
@@ -65,6 +68,7 @@ function HomeContent() {
     fetch('/api/companies').then(r => r.json()).then(d => setSavedCompanies(d.companies || [])).catch(() => {})
     fetch('/api/auth/me').then(r => r.json()).then(d => { if (d.user) setUser(d.user) }).catch(() => {})
     fetch('/api/campaigns').then(r => r.json()).then(d => setCampaigns(d.campaigns || [])).catch(() => {})
+    fetch('/api/gmail/status').then(r => r.json()).then(d => setGmailConnected(d.connected)).catch(() => {})
   }, [])
 
   const logout = async () => {
@@ -653,9 +657,28 @@ function HomeContent() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Generated Message</h3>
                   {message && (
-                    <button onClick={handleCopy} className={`px-2 py-1 text-xs rounded transition-colors ${copied ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>
-                      {copied ? '✓ Copied' : 'Copy'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {(formData.messageType.includes('Email') || formData.messageType === 'Cold Email' || formData.messageType === 'Follow-up Email') && (
+                        gmailConnected ? (
+                          <button 
+                            onClick={() => setShowEmailModal(true)} 
+                            className="px-2 py-1 text-xs rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors"
+                          >
+                            📧 Send
+                          </button>
+                        ) : (
+                          <Link 
+                            href="/settings?tab=integrations" 
+                            className="px-2 py-1 text-xs rounded bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+                          >
+                            📧 Connect Gmail
+                          </Link>
+                        )
+                      )}
+                      <button onClick={handleCopy} className={`px-2 py-1 text-xs rounded transition-colors ${copied ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>
+                        {copied ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
                   )}
                 </div>
                 
@@ -752,6 +775,15 @@ function HomeContent() {
           </div>
         </div>
       </main>
+
+      {/* Email Modal */}
+      <EmailModal
+        isOpen={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+        defaultBody={message}
+        prospectName={formData.prospectName}
+        company={formData.company}
+      />
     </div>
   )
 }
