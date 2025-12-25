@@ -41,7 +41,13 @@ interface Company {
   last_context: string
   last_message_type: string
   has_new_signals: boolean
-  signal_data?: any[]
+  signal_data?: {
+    detected?: any[]
+    count?: number
+    high_priority?: number
+    medium_priority?: number
+    scanned_at?: string
+  } | any[]
   research_links_data?: any[]
   lead_grade?: string
   lead_score?: number
@@ -52,6 +58,8 @@ interface Company {
   is_hiring?: boolean
   buyer_intent?: boolean
   signal_count?: number
+  is_archived?: boolean
+  archived_at?: string
   created_at: string
   updated_at: string
 }
@@ -69,14 +77,17 @@ export default function SavedPage() {
   const [sortBy, setSortBy] = useState('grade_desc')
   const [gradingForm, setGradingForm] = useState<any>({})
   const [showLabelPicker, setShowLabelPicker] = useState(false)
+  const [researchingAll, setResearchingAll] = useState(false)
+  const [researchProgress, setResearchProgress] = useState({ current: 0, total: 0 })
+  const [showArchived, setShowArchived] = useState(false)
   const router = useRouter()
 
   useEffect(() => { fetchCompanies() }, [])
-  useEffect(() => { applyFilters() }, [companies, searchQuery, filterGrade, sortBy])
+  useEffect(() => { applyFilters() }, [companies, searchQuery, filterGrade, sortBy, showArchived])
 
   const fetchCompanies = async () => {
     try {
-      const res = await fetch('/api/companies')
+      const res = await fetch('/api/companies', { cache: 'no-store' })
       const data = await res.json()
       setCompanies(data.companies || [])
     } catch { }
@@ -85,6 +96,14 @@ export default function SavedPage() {
 
   const applyFilters = () => {
     let result = [...companies]
+    
+    // Filter archived
+    if (!showArchived) {
+      result = result.filter(c => !c.is_archived)
+    } else {
+      result = result.filter(c => c.is_archived)
+    }
+    
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       result = result.filter(c => c.company_name.toLowerCase().includes(q) || c.last_prospect_name?.toLowerCase().includes(q))
@@ -111,14 +130,44 @@ export default function SavedPage() {
       const res = await fetch('/api/companies/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: id, company_name: name, industry })
+        body: JSON.stringify({ company_id: id, company_name: name, industry }),
+        cache: 'no-store'
       })
       const data = await res.json()
+      console.log('Refresh response:', data)
+      
       if (data.success) {
-        await fetchCompanies()
-        if (selected?.id === id) setSelected(prev => prev ? { ...prev, signal_data: data.signalData } : null)
+        // Fetch fresh data from database with cache bust
+        const companiesRes = await fetch('/api/companies?t=' + Date.now(), { cache: 'no-store' })
+        const companiesData = await companiesRes.json()
+        const freshCompanies = companiesData.companies || []
+        console.log('Fresh companies fetched:', freshCompanies.length)
+        
+        setCompanies(freshCompanies)
+        
+        // Update selected with fresh data
+        const updatedCompany = freshCompanies.find((c: Company) => c.id === id)
+        if (updatedCompany) {
+          console.log('Updated company:', updatedCompany)
+          setSelected(updatedCompany)
+          // Also update grading form if on grading tab
+          setGradingForm({
+            buyerIntent: updatedCompany.buyer_intent || updatedCompany.grading_data?.buyerIntent,
+            activelyHiring: updatedCompany.is_hiring || updatedCompany.grading_data?.activelyHiring,
+            fundingStage: updatedCompany.funding_stage || updatedCompany.grading_data?.fundingStage,
+            fundingAmount: updatedCompany.funding_amount || updatedCompany.grading_data?.fundingAmount,
+            revenueRange: updatedCompany.revenue_range || updatedCompany.grading_data?.revenueRange,
+            companySize: updatedCompany.employee_count || updatedCompany.grading_data?.companySize,
+            geography: updatedCompany.country || updatedCompany.grading_data?.geography,
+            yearFounded: updatedCompany.founded_year || updatedCompany.grading_data?.yearFounded
+          })
+        }
+      } else {
+        console.error('Refresh failed:', data.error)
       }
-    } catch { }
+    } catch (e) {
+      console.error('Refresh error:', e)
+    }
     finally { setRefreshing(null) }
   }
 
@@ -127,6 +176,44 @@ export default function SavedPage() {
     await fetch(`/api/companies?id=${id}`, { method: 'DELETE' })
     setSelected(null)
     fetchCompanies()
+  }
+
+  const archiveCompany = async (id: number) => {
+    await updateCompany(id, { is_archived: true, archived_at: new Date().toISOString() })
+    setSelected(null)
+  }
+
+  const unarchiveCompany = async (id: number) => {
+    await updateCompany(id, { is_archived: false, archived_at: null })
+    setSelected(null)
+  }
+
+  const researchAllCompanies = async () => {
+    const toResearch = companies.filter(c => !c.signal_data || c.signal_count === 0)
+    if (toResearch.length === 0) {
+      alert('All companies already have research data')
+      return
+    }
+    
+    setResearchingAll(true)
+    setResearchProgress({ current: 0, total: toResearch.length })
+    
+    for (let i = 0; i < toResearch.length; i++) {
+      const c = toResearch[i]
+      try {
+        await fetch('/api/companies/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: c.id, company_name: c.company_name, industry: c.industry })
+        })
+      } catch (e) {
+        console.error('Research failed for', c.company_name)
+      }
+      setResearchProgress({ current: i + 1, total: toResearch.length })
+    }
+    
+    await fetchCompanies()
+    setResearchingAll(false)
   }
 
   const updateCompany = async (id: number, updates: any) => {
@@ -212,6 +299,26 @@ export default function SavedPage() {
   }
 
   const formatDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A'
+
+  // Helper to get signals from either old array format or new object format
+  const getSignals = (c: Company) => {
+    if (!c.signal_data) return []
+    if (Array.isArray(c.signal_data)) return c.signal_data
+    if (c.signal_data.detected) return c.signal_data.detected
+    return []
+  }
+
+  const getSignalStats = (c: Company) => {
+    if (!c.signal_data || Array.isArray(c.signal_data)) {
+      return { high: 0, medium: 0, low: 0, total: c.signal_count || 0 }
+    }
+    return {
+      high: c.signal_data.high_priority || 0,
+      medium: c.signal_data.medium_priority || 0,
+      low: (c.signal_data.count || 0) - (c.signal_data.high_priority || 0) - (c.signal_data.medium_priority || 0),
+      total: c.signal_data.count || 0
+    }
+  }
 
   return (
     <div className="flex h-screen bg-zinc-950">
@@ -335,27 +442,58 @@ export default function SavedPage() {
               )}
 
               {activeTab === 'signals' && (
-                selected.signal_data?.length ? (
-                  <div className="space-y-2">
-                    {selected.signal_data.map((s: any, i: number) => (
-                      <div key={i} className="bg-zinc-950 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`px-2 py-0.5 text-xs rounded ${SIGNAL_COLORS[s.type] || 'bg-zinc-700'} text-white`}>{s.label}</span>
-                          {s.publishedDate && <span className="text-xs text-zinc-500">{formatDate(s.publishedDate)}</span>}
+                <>
+                  {/* Signal summary */}
+                  {getSignals(selected).length > 0 && (
+                    <div className="flex items-center gap-2 mb-4 p-3 bg-zinc-950 rounded-lg">
+                      <span className="text-sm text-zinc-400">Detected:</span>
+                      {getSignalStats(selected).high > 0 && (
+                        <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">🔥 {getSignalStats(selected).high} High</span>
+                      )}
+                      {getSignalStats(selected).medium > 0 && (
+                        <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded">⚡ {getSignalStats(selected).medium} Medium</span>
+                      )}
+                      {getSignalStats(selected).low > 0 && (
+                        <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">📌 {getSignalStats(selected).low} Low</span>
+                      )}
+                    </div>
+                  )}
+                  
+                  {getSignals(selected).length > 0 ? (
+                    <div className="space-y-2">
+                      {getSignals(selected).map((s: any, i: number) => (
+                        <div key={i} className={`rounded-lg p-3 border ${
+                          s.priority === 'high' ? 'bg-red-500/10 border-red-500/30' :
+                          s.priority === 'medium' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                          'bg-zinc-950 border-zinc-800'
+                        }`}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-sm">{s.label || s.type}</span>
+                            {s.priority && (
+                              <span className={`px-1.5 py-0.5 text-[10px] rounded ${
+                                s.priority === 'high' ? 'bg-red-500/30 text-red-400' :
+                                s.priority === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
+                                'bg-blue-500/30 text-blue-400'
+                              }`}>
+                                {s.priority}
+                              </span>
+                            )}
+                            {s.publishedDate && <span className="text-xs text-zinc-500 ml-auto">{formatDate(s.publishedDate)}</span>}
+                          </div>
+                          <p className="text-white text-sm font-medium">{s.detail || s.title}</p>
+                          {s.content && <p className="text-zinc-400 text-xs mt-1 line-clamp-2">{s.content}</p>}
+                          {s.url && <a href={s.url} target="_blank" className="text-yellow-400 text-xs mt-2 inline-block hover:underline">{s.source} →</a>}
                         </div>
-                        <p className="text-white text-sm font-medium">{s.title}</p>
-                        <p className="text-zinc-400 text-sm mt-1">{s.content}</p>
-                        {s.url && <a href={s.url} target="_blank" className="text-yellow-400 text-xs mt-2 inline-block hover:underline">{s.source} →</a>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 text-zinc-600">
-                    <span className="text-3xl block mb-2">🔔</span>
-                    <p>No signals yet</p>
-                    <p className="text-xs mt-1">Click "Scan Signals" to search</p>
-                  </div>
-                )
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 text-zinc-600">
+                      <span className="text-3xl block mb-2">🔔</span>
+                      <p>No signals yet</p>
+                      <p className="text-xs mt-1">Click "Scan Signals" to search</p>
+                    </div>
+                  )}
+                </>
               )}
 
               {activeTab === 'grading' && (
@@ -456,6 +594,15 @@ export default function SavedPage() {
               <button onClick={() => { setSelected(null); goToGenerate(selected) }} className="flex-1 px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold hover:bg-yellow-300">
                 ✉️ Generate Message
               </button>
+              {selected.is_archived ? (
+                <button onClick={() => unarchiveCompany(selected.id)} className="px-4 py-2 bg-amber-500/20 text-amber-400 rounded-lg text-sm hover:bg-amber-500/30">
+                  📤 Unarchive
+                </button>
+              ) : (
+                <button onClick={() => archiveCompany(selected.id)} className="px-4 py-2 bg-zinc-800 text-zinc-400 rounded-lg text-sm hover:bg-zinc-700">
+                  📁 Archive
+                </button>
+              )}
               <button onClick={() => deleteCompany(selected.id)} className="px-4 py-2 bg-red-500/20 text-red-400 rounded-lg text-sm hover:bg-red-500/30">
                 🗑️
               </button>
@@ -508,6 +655,21 @@ export default function SavedPage() {
               <span className="text-xs text-zinc-500">{filtered.length} of {companies.length}</span>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowArchived(!showArchived)}
+                className={`px-3 py-1.5 rounded-lg text-sm ${showArchived ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
+              >
+                📁 {showArchived ? 'Archived' : 'Archive'}
+              </button>
+              {companies.length > 0 && !showArchived && (
+                <button 
+                  onClick={researchAllCompanies} 
+                  disabled={researchingAll}
+                  className="px-3 py-1.5 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-lg text-sm hover:bg-blue-500/30 disabled:opacity-50"
+                >
+                  {researchingAll ? `🔄 ${researchProgress.current}/${researchProgress.total}` : '🔍 Research All'}
+                </button>
+              )}
               <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
                 <option value="">All Grades</option>
                 {['A','B','C','D','E'].map(g => <option key={g} value={g}>Grade {g}</option>)}
@@ -569,6 +731,8 @@ export default function SavedPage() {
                     {c.industry && <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs rounded">{c.industry}</span>}
                     {c.country && <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs rounded">{c.country}</span>}
                     {c.funding_stage && <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs rounded">{c.funding_stage}</span>}
+                    {getSignalStats(c).high > 0 && <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">🔥 {getSignalStats(c).high}</span>}
+                    {getSignalStats(c).total > 0 && getSignalStats(c).high === 0 && <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">📊 {getSignalStats(c).total}</span>}
                   </div>
 
                   {c.labels && c.labels.length > 0 && (

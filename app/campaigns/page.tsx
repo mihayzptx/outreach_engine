@@ -3,47 +3,32 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 
-interface Touch {
-  id?: number
-  step_number: number
-  channel: string
-  day_number: number
-  context_template: string
-  goal: string
-  custom_instructions: string
-}
-
 interface Prospect {
-  id?: number
   prospect_name: string
   prospect_title: string
   company: string
   email: string
-  industry: string
-  context: string
+  linkedin?: string
   variables: Record<string, string>
+  researched?: boolean
+  hooks?: string[]
 }
 
-interface GeneratedMessage {
-  id?: number
-  prospect_id: number
-  touch_id: number
+interface Touch {
   step_number: number
-  generated_message: string
-  variables_used: Record<string, string>
-  status: string
+  channel: string
+  day_number: number
+  goal: string
+  template: string
 }
 
 interface Campaign {
-  id: number
+  id?: number
   name: string
-  description: string
-  default_tone: string
-  default_length: string
+  variables: string[]
   touches: Touch[]
-  prospects?: Prospect[]
-  messages?: GeneratedMessage[]
-  created_at: string
+  prospects: Prospect[]
+  created_at?: string
 }
 
 const CHANNELS = [
@@ -54,326 +39,349 @@ const CHANNELS = [
   { value: 'ABM', label: 'ABM (Recognition)', icon: '🎯' }
 ]
 
-const TONES = ['professional', 'casual', 'direct', 'warm', 'enthusiastic']
-const LENGTHS = ['short', 'medium', 'long']
+const DEFAULT_VARIABLES = ['name', 'company', 'title', 'achievement', 'pain_point', 'hook']
 
-const CAMPAIGN_TEMPLATES = [
-  {
-    name: 'ABM Recognition',
-    description: 'Single soft touch to recognize achievement',
-    icon: '🎯',
-    default_tone: 'warm',
-    default_length: 'short',
-    touches: [
-      { step_number: 1, channel: 'ABM', day_number: 1, context_template: '', goal: 'Recognition only, build goodwill', custom_instructions: 'No ask, no pitch. Pure recognition of their achievement. End with warm wishes.' }
-    ],
-    best_for: 'Executives, warm-up before outreach'
-  },
-  {
-    name: 'LinkedIn Nurture',
-    description: '3-touch LinkedIn sequence',
-    icon: '🔗',
-    default_tone: 'professional',
-    default_length: 'short',
-    touches: [
-      { step_number: 1, channel: 'LinkedIn Connection', day_number: 1, context_template: '', goal: 'Get connected', custom_instructions: 'Personalized connection note. Reference specific detail. No pitch.' },
-      { step_number: 2, channel: 'LinkedIn Message', day_number: 3, context_template: '', goal: 'Thank + soft value', custom_instructions: 'Thank for connecting. Share one relevant insight. No ask yet.' },
-      { step_number: 3, channel: 'LinkedIn Message', day_number: 7, context_template: '', goal: 'Open conversation', custom_instructions: 'Reference their challenge or goal. Soft question to start dialogue.' }
-    ],
-    best_for: 'New prospects, relationship building'
-  },
-  {
-    name: 'Cold Email Sequence',
-    description: '3-touch email outreach',
-    icon: '📧',
-    default_tone: 'direct',
-    default_length: 'medium',
-    touches: [
-      { step_number: 1, channel: 'Cold Email', day_number: 1, context_template: '', goal: 'Get reply or meeting', custom_instructions: 'Lead with their specific pain point. One clear CTA.' },
-      { step_number: 2, channel: 'Follow-up Email', day_number: 4, context_template: '', goal: 'Bump + new angle', custom_instructions: 'New angle or additional value point. Reference first email briefly.' },
-      { step_number: 3, channel: 'Follow-up Email', day_number: 9, context_template: '', goal: 'Final attempt', custom_instructions: 'Direct ask. Easy yes/no question. Leave door open.' }
-    ],
-    best_for: 'Time-sensitive outreach, clear ICP match'
-  }
+const TEMPLATE_SUGGESTIONS = [
+  { channel: 'LinkedIn Connection', template: 'Hi {name}, noticed {company} {achievement}. Would love to connect and learn more about your approach.' },
+  { channel: 'LinkedIn Message', template: 'Thanks for connecting, {name}! {hook} - curious how {company} is handling {pain_point}?' },
+  { channel: 'Cold Email', template: 'Hi {name},\n\n{hook}\n\nAt Tech-stack.io, we help companies like {company} tackle {pain_point}.\n\nWorth a quick chat?\n\nBest' },
+  { channel: 'Follow-up Email', template: 'Hi {name}, following up on my last note. {hook} - would love to share how we helped similar companies.\n\n15 mins this week?' },
+  { channel: 'ABM', template: 'Congrats on {achievement}, {name}! Impressive work at {company}.' }
 ]
 
-const DEFAULT_VARIABLES = ['name', 'company', 'title', 'industry', 'recent_news', 'pain_point', 'achievement']
-
 export default function CampaignsPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [view, setView] = useState<'list' | 'create' | 'detail'>('list')
-  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
-  const [showTemplates, setShowTemplates] = useState(false)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [selectedCampaignIdx, setSelectedCampaignIdx] = useState<number | null>(null)
+  const [step, setStep] = useState<'list' | 'upload' | 'research' | 'builder' | 'export'>('list')
   
-  // Create form state
-  const [formData, setFormData] = useState({
+  // Campaign data
+  const [campaign, setCampaign] = useState<Campaign>({
     name: '',
-    description: '',
-    default_tone: 'professional',
-    default_length: 'medium',
-    touches: [] as Touch[]
+    variables: DEFAULT_VARIABLES,
+    touches: [],
+    prospects: []
   })
   
-  // Prospects state
-  const [prospects, setProspects] = useState<Prospect[]>([])
-  const [newProspect, setNewProspect] = useState<Prospect>({
-    prospect_name: '', prospect_title: '', company: '', email: '', industry: '', context: '', variables: {}
-  })
-  
-  // Messages state
-  const [messages, setMessages] = useState<GeneratedMessage[]>([])
-  const [generating, setGenerating] = useState(false)
-  const [generatingProgress, setGeneratingProgress] = useState({ current: 0, total: 0 })
-  
-  // Variable editor
-  const [editingMessage, setEditingMessage] = useState<GeneratedMessage | null>(null)
-  const [availableVariables, setAvailableVariables] = useState<string[]>(DEFAULT_VARIABLES)
+  // UI state
+  const [researching, setResearching] = useState(false)
+  const [researchProgress, setResearchProgress] = useState({ current: 0, total: 0 })
+  const [selectedTouch, setSelectedTouch] = useState(0)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [newVariable, setNewVariable] = useState('')
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [generating, setGenerating] = useState(false)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Load campaigns
   useEffect(() => {
-    fetchCampaigns()
+    const saved = localStorage.getItem('campaigns')
+    if (saved) {
+      try { setCampaigns(JSON.parse(saved)) } catch {}
+    }
   }, [])
 
-  const fetchCampaigns = async () => {
-    const res = await fetch('/api/campaigns')
-    const data = await res.json()
-    setCampaigns(data.campaigns || [])
+  const saveCampaigns = (updated: Campaign[]) => {
+    setCampaigns(updated)
+    localStorage.setItem('campaigns', JSON.stringify(updated))
   }
 
-  const resetForm = () => {
-    setFormData({ name: '', description: '', default_tone: 'professional', default_length: 'medium', touches: [] })
-    setProspects([])
-    setMessages([])
-    setView('list')
-    setSelectedCampaign(null)
-  }
-
-  const useTemplate = (template: typeof CAMPAIGN_TEMPLATES[0]) => {
-    setFormData({
-      name: template.name,
-      description: template.description,
-      default_tone: template.default_tone,
-      default_length: template.default_length,
-      touches: template.touches.map(t => ({ ...t }))
+  // Create new campaign
+  const startNewCampaign = () => {
+    setCampaign({
+      name: `Campaign ${campaigns.length + 1}`,
+      variables: DEFAULT_VARIABLES,
+      touches: [],
+      prospects: [],
+      created_at: new Date().toISOString()
     })
-    setShowTemplates(false)
+    setStep('upload')
   }
 
-  const addTouch = () => {
-    const newStep = formData.touches.length + 1
-    const lastDay = formData.touches.length > 0 ? formData.touches[formData.touches.length - 1].day_number : 0
-    setFormData({
-      ...formData,
-      touches: [...formData.touches, {
-        step_number: newStep, channel: 'LinkedIn Message', day_number: lastDay + 3,
-        context_template: '', goal: '', custom_instructions: ''
-      }]
-    })
+  // Open existing campaign
+  const openCampaign = (idx: number) => {
+    setSelectedCampaignIdx(idx)
+    setCampaign(campaigns[idx])
+    setStep('builder')
   }
 
-  const removeTouch = (index: number) => {
-    const updated = formData.touches.filter((_, i) => i !== index).map((t, i) => ({ ...t, step_number: i + 1 }))
-    setFormData({ ...formData, touches: updated })
+  // Save current campaign
+  const saveCampaign = () => {
+    if (selectedCampaignIdx !== null) {
+      const updated = [...campaigns]
+      updated[selectedCampaignIdx] = campaign
+      saveCampaigns(updated)
+    } else {
+      saveCampaigns([...campaigns, campaign])
+      setSelectedCampaignIdx(campaigns.length)
+    }
   }
 
-  const updateTouch = (index: number, field: keyof Touch, value: any) => {
-    const updated = [...formData.touches]
-    updated[index] = { ...updated[index], [field]: value }
-    setFormData({ ...formData, touches: updated })
+  // Delete campaign
+  const deleteCampaign = (idx: number) => {
+    if (!confirm('Delete this campaign?')) return
+    saveCampaigns(campaigns.filter((_, i) => i !== idx))
   }
 
-  // CSV Upload
+  // Back to list
+  const backToList = () => {
+    saveCampaign()
+    setSelectedCampaignIdx(null)
+    setStep('list')
+  }
+
+  // STEP 1: Upload CSV
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    
     const reader = new FileReader()
     reader.onload = (event) => {
       const text = event.target?.result as string
       const lines = text.split('\n').filter(line => line.trim())
       if (lines.length < 2) return
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
+      
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''))
       const nameIdx = headers.findIndex(h => h.includes('name') && !h.includes('company'))
       const titleIdx = headers.findIndex(h => h.includes('title'))
       const companyIdx = headers.findIndex(h => h.includes('company'))
       const emailIdx = headers.findIndex(h => h.includes('email'))
-      const industryIdx = headers.findIndex(h => h.includes('industry'))
-      const contextIdx = headers.findIndex(h => h.includes('context'))
+      const linkedinIdx = headers.findIndex(h => h.includes('linkedin'))
       
       const parsed: Prospect[] = []
       for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+        // Handle quoted CSV values
+        const values: string[] = []
+        let current = ''
+        let inQuotes = false
+        for (const char of lines[i]) {
+          if (char === '"') inQuotes = !inQuotes
+          else if (char === ',' && !inQuotes) { values.push(current.trim()); current = '' }
+          else current += char
+        }
+        values.push(current.trim())
+        
         if (values[nameIdx] || values[companyIdx]) {
           parsed.push({
-            prospect_name: values[nameIdx] || '',
-            prospect_title: values[titleIdx] || '',
-            company: values[companyIdx] || '',
-            email: values[emailIdx] || '',
-            industry: values[industryIdx] || '',
-            context: values[contextIdx] || '',
-            variables: {}
+            prospect_name: values[nameIdx]?.replace(/^"|"$/g, '') || '',
+            prospect_title: values[titleIdx]?.replace(/^"|"$/g, '') || '',
+            company: values[companyIdx]?.replace(/^"|"$/g, '') || '',
+            email: values[emailIdx]?.replace(/^"|"$/g, '') || '',
+            linkedin: values[linkedinIdx]?.replace(/^"|"$/g, '') || '',
+            variables: {
+              name: values[nameIdx]?.replace(/^"|"$/g, '') || '',
+              company: values[companyIdx]?.replace(/^"|"$/g, '') || '',
+              title: values[titleIdx]?.replace(/^"|"$/g, '') || ''
+            },
+            researched: false,
+            hooks: []
           })
         }
       }
-      setProspects([...prospects, ...parsed])
+      
+      setCampaign({ ...campaign, prospects: parsed })
+      setStep('research')
     }
     reader.readAsText(file)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const addProspect = () => {
-    if (!newProspect.prospect_name && !newProspect.company) return
-    setProspects([...prospects, { ...newProspect }])
-    setNewProspect({ prospect_name: '', prospect_title: '', company: '', email: '', industry: '', context: '', variables: {} })
-  }
-
-  const removeProspect = (index: number) => {
-    setProspects(prospects.filter((_, i) => i !== index))
-  }
-
-  // Save Campaign
-  const saveCampaign = async () => {
-    if (!formData.name.trim() || formData.touches.length === 0) return
-
-    const res = await fetch('/api/campaigns', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...formData, prospects })
-    })
-    const data = await res.json()
+  // STEP 2: Research all prospects
+  const researchAll = async () => {
+    setResearching(true)
+    setResearchProgress({ current: 0, total: campaign.prospects.length })
     
-    if (data.campaign) {
-      setSelectedCampaign({ ...data.campaign, prospects, messages: [] })
-      setView('detail')
-      fetchCampaigns()
-    }
-  }
-
-  // Generate Messages
-  const generateMessages = async () => {
-    if (!selectedCampaign || prospects.length === 0) return
+    const updated = [...campaign.prospects]
     
-    setGenerating(true)
-    const total = prospects.length * (selectedCampaign.touches?.length || 0)
-    setGeneratingProgress({ current: 0, total })
-    
-    const newMessages: GeneratedMessage[] = []
-    
-    for (let pIdx = 0; pIdx < prospects.length; pIdx++) {
-      const prospect = prospects[pIdx]
+    for (let i = 0; i < updated.length; i++) {
+      const p = updated[i]
+      if (!p.company) continue
       
-      for (let tIdx = 0; tIdx < (selectedCampaign.touches?.length || 0); tIdx++) {
-        const touch = selectedCampaign.touches[tIdx]
+      try {
+        const res = await fetch('/api/companies/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: 0, company_name: p.company, industry: '' })
+        })
+        const data = await res.json()
         
-        try {
-          const res = await fetch('/api/campaigns/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              campaign: selectedCampaign,
-              prospect,
-              touch,
-              availableVariables
-            })
-          })
-          const data = await res.json()
+        if (data.success && data.signals?.detected) {
+          const signals = data.signals.detected
+          const hooks: string[] = []
           
-          newMessages.push({
-            prospect_id: pIdx,
-            touch_id: tIdx,
-            step_number: touch.step_number,
-            generated_message: data.message || '',
-            variables_used: data.variables || {},
-            status: 'draft'
+          // Extract hooks and fill variables
+          signals.forEach((s: any) => {
+            hooks.push(`${s.label}: ${s.detail}`)
+            
+            if (s.category === 'funding') {
+              updated[i].variables['achievement'] = s.detail
+              updated[i].variables['hook'] = `Saw ${p.company} just ${s.detail.toLowerCase()}`
+            } else if (s.category === 'hiring') {
+              updated[i].variables['pain_point'] = 'scaling the engineering team'
+              if (!updated[i].variables['hook']) {
+                updated[i].variables['hook'] = `Noticed ${p.company} is growing the team`
+              }
+            } else if (s.category === 'leadership') {
+              if (!updated[i].variables['achievement']) {
+                updated[i].variables['achievement'] = s.detail
+              }
+              updated[i].variables['hook'] = `Congrats on ${s.detail.toLowerCase()}`
+            } else if (s.category === 'product') {
+              updated[i].variables['hook'] = `Saw the news about ${s.detail.toLowerCase()}`
+            } else if (s.category === 'acquisition') {
+              updated[i].variables['achievement'] = s.detail
+              updated[i].variables['hook'] = `Big news about ${s.detail.toLowerCase()}`
+            }
           })
-        } catch (e) {
-          newMessages.push({
-            prospect_id: pIdx,
-            touch_id: tIdx,
-            step_number: touch.step_number,
-            generated_message: 'Error generating message',
-            variables_used: {},
-            status: 'error'
-          })
+          
+          // Default hook if none found
+          if (!updated[i].variables['hook'] && signals.length > 0) {
+            updated[i].variables['hook'] = `Been following ${p.company}'s recent updates`
+          }
+          
+          updated[i].hooks = hooks
+          updated[i].researched = true
         }
-        
-        setGeneratingProgress({ current: pIdx * (selectedCampaign.touches?.length || 0) + tIdx + 1, total })
+      } catch (e) {
+        console.error('Research failed for', p.company)
       }
+      
+      setResearchProgress({ current: i + 1, total: campaign.prospects.length })
+      setCampaign({ ...campaign, prospects: [...updated] })
     }
     
-    setMessages(newMessages)
+    setCampaign({ ...campaign, prospects: updated })
+    setResearching(false)
+  }
+
+  // STEP 3: Campaign Builder
+  const addTouch = (channel?: string) => {
+    const suggestion = channel ? TEMPLATE_SUGGESTIONS.find(t => t.channel === channel) : null
+    const newTouch: Touch = {
+      step_number: campaign.touches.length + 1,
+      channel: channel || 'LinkedIn Connection',
+      day_number: campaign.touches.length === 0 ? 1 : (campaign.touches[campaign.touches.length - 1].day_number + 3),
+      goal: '',
+      template: suggestion?.template || ''
+    }
+    setCampaign({ ...campaign, touches: [...campaign.touches, newTouch] })
+    setSelectedTouch(campaign.touches.length)
+  }
+
+  const updateTouch = (field: keyof Touch, value: any) => {
+    const updated = [...campaign.touches]
+    updated[selectedTouch] = { ...updated[selectedTouch], [field]: value }
+    
+    // Auto-suggest template when channel changes
+    if (field === 'channel' && !updated[selectedTouch].template) {
+      const suggestion = TEMPLATE_SUGGESTIONS.find(t => t.channel === value)
+      if (suggestion) updated[selectedTouch].template = suggestion.template
+    }
+    
+    setCampaign({ ...campaign, touches: updated })
+  }
+
+  const removeTouch = (idx: number) => {
+    const updated = campaign.touches.filter((_, i) => i !== idx).map((t, i) => ({ ...t, step_number: i + 1 }))
+    setCampaign({ ...campaign, touches: updated })
+    if (selectedTouch >= updated.length) setSelectedTouch(Math.max(0, updated.length - 1))
+  }
+
+  const generateTemplate = async () => {
+    if (!campaign.touches[selectedTouch]) return
+    setGenerating(true)
+    
+    try {
+      const touch = campaign.touches[selectedTouch]
+      const sampleProspect = campaign.prospects.find(p => p.researched) || campaign.prospects[0]
+      
+      const res = await fetch('/api/campaigns/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign: { default_tone: 'professional', default_length: 'short' },
+          prospect: { 
+            prospect_name: '{name}', 
+            company: '{company}', 
+            prospect_title: '{title}',
+            context: sampleProspect?.hooks?.join('. ') || ''
+          },
+          touch: { channel: touch.channel, goal: touch.goal, custom_instructions: 'Use {variable} format for personalization' },
+          availableVariables: campaign.variables
+        })
+      })
+      const data = await res.json()
+      if (data.message) {
+        updateTouch('template', data.message)
+      }
+    } catch (e) {
+      console.error('Generation failed:', e)
+    }
+    
     setGenerating(false)
   }
 
-  // Variable Management
+  // Variables
   const addVariable = () => {
-    if (!newVariable.trim() || availableVariables.includes(newVariable.toLowerCase())) return
-    setAvailableVariables([...availableVariables, newVariable.toLowerCase().replace(/\s+/g, '_')])
+    const v = newVariable.trim().toLowerCase().replace(/\s+/g, '_')
+    if (!v || campaign.variables.includes(v)) return
+    setCampaign({ ...campaign, variables: [...campaign.variables, v] })
     setNewVariable('')
   }
 
   const removeVariable = (v: string) => {
-    if (DEFAULT_VARIABLES.includes(v)) return
-    setAvailableVariables(availableVariables.filter(x => x !== v))
+    if (['name', 'company', 'title'].includes(v)) return
+    setCampaign({ ...campaign, variables: campaign.variables.filter(x => x !== v) })
   }
 
-  const updateMessageVariable = (msgIndex: number, varName: string, value: string) => {
-    const updated = [...messages]
-    updated[msgIndex].variables_used[varName] = value
-    // Re-render message with new variable value
-    let msg = updated[msgIndex].generated_message
-    Object.entries(updated[msgIndex].variables_used).forEach(([k, v]) => {
-      msg = msg.replace(new RegExp(`{${k}}`, 'gi'), v)
+  const updateProspectVariable = (pIdx: number, varName: string, value: string) => {
+    const updated = [...campaign.prospects]
+    updated[pIdx].variables[varName] = value
+    setCampaign({ ...campaign, prospects: updated })
+  }
+
+  // Render message
+  const renderMessage = (template: string, prospect: Prospect): string => {
+    let msg = template
+    Object.entries(prospect.variables).forEach(([key, val]) => {
+      msg = msg.replace(new RegExp(`\\{${key}\\}`, 'gi'), val || `{${key}}`)
     })
-    setMessages(updated)
+    return msg
   }
 
-  const updateMessageText = (msgIndex: number, text: string) => {
-    const updated = [...messages]
-    updated[msgIndex].generated_message = text
-    setMessages(updated)
+  const copyMessage = (pIdx: number, tIdx: number) => {
+    const msg = renderMessage(campaign.touches[tIdx].template, campaign.prospects[pIdx])
+    navigator.clipboard.writeText(msg)
+    setCopiedIdx(pIdx * 100 + tIdx)
+    setTimeout(() => setCopiedIdx(null), 2000)
   }
 
-  // Export
-  const exportMessages = () => {
-    const rows = [['Prospect', 'Company', 'Email', 'Touch', 'Channel', 'Day', 'Message']]
-    messages.forEach(msg => {
-      const prospect = prospects[msg.prospect_id]
-      const touch = selectedCampaign?.touches[msg.touch_id]
+  // STEP 4: Export
+  const exportContacts = () => {
+    const varCols = campaign.variables.filter(v => !['name', 'company', 'title'].includes(v))
+    const headers = ['name', 'title', 'company', 'email', 'linkedin', ...varCols.map(v => v)]
+    const rows = [headers]
+    
+    campaign.prospects.forEach(p => {
       rows.push([
-        prospect?.prospect_name || '',
-        prospect?.company || '',
-        prospect?.email || '',
-        `Touch ${msg.step_number}`,
-        touch?.channel || '',
-        `Day ${touch?.day_number || 0}`,
-        `"${msg.generated_message.replace(/"/g, '""')}"`
+        p.prospect_name,
+        p.prospect_title,
+        p.company,
+        p.email,
+        p.linkedin || '',
+        ...varCols.map(v => `"${(p.variables[v] || '').replace(/"/g, '""')}"`)
       ])
     })
+    
     const csv = rows.map(r => r.join(',')).join('\n')
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    a.download = `${selectedCampaign?.name || 'campaign'}-messages.csv`
+    a.download = `${campaign.name}-contacts.csv`
     a.click()
   }
 
   const getChannelIcon = (channel: string) => CHANNELS.find(c => c.value === channel)?.icon || '📝'
-
-  const openCampaignDetail = (campaign: Campaign) => {
-    setSelectedCampaign(campaign)
-    setProspects(campaign.prospects || [])
-    setMessages(campaign.messages || [])
-    setFormData({
-      name: campaign.name,
-      description: campaign.description || '',
-      default_tone: campaign.default_tone,
-      default_length: campaign.default_length,
-      touches: campaign.touches || []
-    })
-    setView('detail')
-  }
 
   return (
     <div className="flex h-screen bg-zinc-950">
@@ -397,93 +405,72 @@ export default function CampaignsPage() {
       </aside>
 
       <main className="flex-1 overflow-auto">
+        {/* Header */}
         <header className="bg-zinc-900/80 backdrop-blur border-b border-zinc-800 px-4 lg:px-6 py-3 sticky top-0 z-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1.5 text-zinc-400 hover:text-white">☰</button>
-              {view === 'list' && <h1 className="text-lg font-semibold text-white">Campaigns</h1>}
-              {view === 'create' && <h1 className="text-lg font-semibold text-white">New Campaign</h1>}
-              {view === 'detail' && (
+              
+              {step === 'list' && <h1 className="text-lg font-semibold text-white">Campaigns</h1>}
+              
+              {step !== 'list' && (
                 <>
-                  <button onClick={resetForm} className="text-zinc-400 hover:text-white">←</button>
-                  <h1 className="text-lg font-semibold text-white">{selectedCampaign?.name}</h1>
+                  <button onClick={backToList} className="text-zinc-400 hover:text-white">←</button>
+                  <input 
+                    type="text" 
+                    value={campaign.name} 
+                    onChange={e => setCampaign({ ...campaign, name: e.target.value })}
+                    className="bg-transparent text-white text-lg font-semibold border-b border-transparent hover:border-zinc-600 focus:border-yellow-400 outline-none"
+                  />
                 </>
               )}
             </div>
-            <div className="flex gap-2">
-              {view === 'list' && (
-                <>
-                  <button onClick={() => setShowTemplates(true)} className="px-4 py-1.5 bg-zinc-800 text-white rounded-lg text-sm font-medium hover:bg-zinc-700">📋 Templates</button>
-                  <button onClick={() => setView('create')} className="px-4 py-1.5 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium hover:bg-yellow-300">+ New</button>
-                </>
-              )}
-              {view === 'create' && (
-                <>
-                  <button onClick={resetForm} className="px-4 py-1.5 text-zinc-400 hover:text-white text-sm">Cancel</button>
-                  <button onClick={saveCampaign} disabled={!formData.name || formData.touches.length === 0} className="px-4 py-1.5 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium hover:bg-yellow-300 disabled:opacity-50">Save & Continue</button>
-                </>
-              )}
-              {view === 'detail' && messages.length > 0 && (
-                <button onClick={exportMessages} className="px-4 py-1.5 bg-emerald-500 text-white rounded-lg text-sm font-medium hover:bg-emerald-400">Export CSV</button>
-              )}
-            </div>
+            
+            {/* Progress steps */}
+            {step !== 'list' && (
+              <div className="flex items-center gap-1">
+                {['upload', 'research', 'builder', 'export'].map((s, i) => (
+                  <div key={s} className="flex items-center">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium ${
+                      step === s ? 'bg-yellow-400 text-zinc-900' : 
+                      ['upload', 'research', 'builder', 'export'].indexOf(step) > i ? 'bg-emerald-500 text-white' : 
+                      'bg-zinc-800 text-zinc-500'
+                    }`}>
+                      {i + 1}
+                    </div>
+                    {i < 3 && <div className={`w-8 h-0.5 ${['upload', 'research', 'builder', 'export'].indexOf(step) > i ? 'bg-emerald-500' : 'bg-zinc-800'}`} />}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </header>
 
-        <div className="p-4 lg:p-6 max-w-5xl mx-auto">
+        <div className="p-4 lg:p-6 max-w-6xl mx-auto">
           
-          {/* Template Selector Modal */}
-          {showTemplates && (
-            <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setShowTemplates(false)}>
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 max-w-2xl w-full" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-white font-semibold">Choose Template</h3>
-                  <button onClick={() => setShowTemplates(false)} className="text-zinc-500 hover:text-white text-xl">×</button>
-                </div>
-                <div className="grid md:grid-cols-2 gap-3">
-                  {CAMPAIGN_TEMPLATES.map((t, i) => (
-                    <div key={i} onClick={() => { useTemplate(t); setView('create') }} className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg hover:border-yellow-400/50 cursor-pointer">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xl">{t.icon}</span>
-                        <h4 className="text-white font-medium">{t.name}</h4>
-                        <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded">{t.touches.length} touches</span>
-                      </div>
-                      <p className="text-zinc-500 text-sm mb-1">{t.description}</p>
-                      <p className="text-[10px] text-zinc-600">Best for: {t.best_for}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* LIST VIEW */}
-          {view === 'list' && (
+          {/* CAMPAIGNS LIST */}
+          {step === 'list' && (
             <>
+              <div className="flex justify-end mb-6">
+                <button onClick={startNewCampaign} className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium hover:bg-yellow-300">+ New Campaign</button>
+              </div>
+              
               {campaigns.length === 0 ? (
-                <div className="text-center py-12">
+                <div className="text-center py-16">
                   <span className="text-4xl block mb-3">🎯</span>
                   <p className="text-zinc-500 mb-4">No campaigns yet</p>
-                  <div className="flex justify-center gap-2">
-                    <button onClick={() => setShowTemplates(true)} className="px-4 py-2 bg-zinc-800 text-white rounded-lg text-sm">Start from Template</button>
-                    <button onClick={() => setView('create')} className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium">Create New</button>
-                  </div>
+                  <button onClick={startNewCampaign} className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium">Create First Campaign</button>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {campaigns.map(c => (
-                    <div key={c.id} onClick={() => openCampaignDetail(c)} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700 cursor-pointer transition-colors">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="text-white font-medium">{c.name}</h3>
-                          <p className="text-zinc-500 text-sm">{c.description}</p>
-                          <div className="flex items-center gap-2 mt-2">
-                            <span className="text-[10px] px-2 py-0.5 bg-yellow-400/20 text-yellow-400 rounded">{c.touches?.length || 0} touches</span>
-                            <span className="text-[10px] px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">{c.default_tone}</span>
-                          </div>
-                        </div>
-                        <span className="text-zinc-600">→</span>
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {campaigns.map((c, idx) => (
+                    <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700">
+                      <div className="flex justify-between mb-2">
+                        <h3 className="text-white font-medium">{c.name}</h3>
+                        <button onClick={() => deleteCampaign(idx)} className="text-zinc-500 hover:text-red-400">🗑️</button>
                       </div>
+                      <p className="text-zinc-500 text-sm mb-3">{c.prospects.length} contacts · {c.touches.length} touches</p>
+                      <button onClick={() => openCampaign(idx)} className="w-full py-2 bg-zinc-800 text-zinc-300 rounded-lg text-sm hover:bg-zinc-700">Open →</button>
                     </div>
                   ))}
                 </div>
@@ -491,277 +478,383 @@ export default function CampaignsPage() {
             </>
           )}
 
-          {/* CREATE VIEW */}
-          {view === 'create' && (
+          {/* STEP 1: UPLOAD */}
+          {step === 'upload' && (
+            <div className="max-w-xl mx-auto text-center py-12">
+              <span className="text-5xl block mb-4">📄</span>
+              <h2 className="text-xl font-semibold text-white mb-2">Upload Contact List</h2>
+              <p className="text-zinc-500 mb-6">CSV with columns: name, title, company, email, linkedin</p>
+              
+              <input type="file" ref={fileInputRef} accept=".csv" onChange={handleFileUpload} className="hidden" />
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                className="px-6 py-3 bg-yellow-400 text-zinc-900 rounded-lg font-medium hover:bg-yellow-300"
+              >
+                Choose CSV File
+              </button>
+              
+              <p className="text-zinc-600 text-sm mt-4">or</p>
+              <button 
+                onClick={() => { setCampaign({ ...campaign, prospects: [] }); setStep('research') }}
+                className="text-zinc-400 text-sm mt-2 hover:text-white"
+              >
+                Skip and add manually →
+              </button>
+            </div>
+          )}
+
+          {/* STEP 2: RESEARCH */}
+          {step === 'research' && (
             <div className="space-y-6">
-              {/* Basic Info */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <h3 className="text-sm font-semibold text-white mb-4">Campaign Details</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
-                    <label className="text-xs text-zinc-500 block mb-1">Name *</label>
-                    <input type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Q1 Outreach" className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="text-xs text-zinc-500 block mb-1">Description</label>
-                    <input type="text" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="Target recently funded startups" className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-zinc-500 block mb-1">Tone</label>
-                    <select value={formData.default_tone} onChange={e => setFormData({...formData, default_tone: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm">
-                      {TONES.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-zinc-500 block mb-1">Length</label>
-                    <select value={formData.default_length} onChange={e => setFormData({...formData, default_length: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm">
-                      {LENGTHS.map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                  </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-white">Research Contacts</h2>
+                  <p className="text-zinc-500 text-sm">{campaign.prospects.filter(p => p.researched).length} of {campaign.prospects.length} researched</p>
+                </div>
+                <div className="flex gap-2">
+                  {!researching && campaign.prospects.some(p => !p.researched) && (
+                    <button onClick={researchAll} className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-400">
+                      🔍 Research All
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => { saveCampaign(); setStep('builder') }} 
+                    className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium hover:bg-yellow-300"
+                  >
+                    Continue to Builder →
+                  </button>
                 </div>
               </div>
 
-              {/* Touches */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold text-white">Sequence Touches *</h3>
-                  <button onClick={addTouch} className="px-3 py-1 bg-yellow-400/20 text-yellow-400 rounded-lg text-xs">+ Add Touch</button>
+              {researching && (
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-blue-400">Researching {researchProgress.current} of {researchProgress.total}...</span>
+                  </div>
+                  <div className="mt-2 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 transition-all" style={{ width: `${(researchProgress.current / researchProgress.total) * 100}%` }} />
+                  </div>
                 </div>
-                {formData.touches.length === 0 ? (
-                  <div className="text-center py-8 border border-dashed border-zinc-700 rounded-lg">
-                    <p className="text-zinc-500 text-sm mb-2">No touches yet</p>
-                    <button onClick={addTouch} className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium">Add First Touch</button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {formData.touches.map((touch, i) => (
-                      <div key={i} className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center gap-2">
-                            <span className="w-6 h-6 bg-yellow-400 text-zinc-900 rounded-full flex items-center justify-center text-xs font-bold">{touch.step_number}</span>
-                            <span className="text-white text-sm font-medium">Touch {touch.step_number}</span>
-                          </div>
-                          <button onClick={() => removeTouch(i)} className="text-zinc-500 hover:text-red-400 text-sm">Remove</button>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 mb-3">
-                          <div>
-                            <label className="text-[10px] text-zinc-500 block mb-1">Channel</label>
-                            <select value={touch.channel} onChange={e => updateTouch(i, 'channel', e.target.value)} className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm">
-                              {CHANNELS.map(c => <option key={c.value} value={c.value}>{c.icon} {c.label}</option>)}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="text-[10px] text-zinc-500 block mb-1">Day</label>
-                            <input type="number" min="1" value={touch.day_number} onChange={e => updateTouch(i, 'day_number', parseInt(e.target.value) || 1)} className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm" />
-                          </div>
-                        </div>
-                        <div className="mb-3">
-                          <label className="text-[10px] text-zinc-500 block mb-1">Goal</label>
-                          <input type="text" value={touch.goal} onChange={e => updateTouch(i, 'goal', e.target.value)} placeholder="What should this touch achieve?" className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm" />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-zinc-500 block mb-1">AI Instructions</label>
-                          <textarea value={touch.custom_instructions} onChange={e => updateTouch(i, 'custom_instructions', e.target.value)} placeholder="Special instructions..." className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm h-16 resize-none" />
-                        </div>
-                      </div>
+              )}
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-zinc-950 border-b border-zinc-800">
+                      <th className="text-left text-xs text-zinc-500 px-4 py-3">Contact</th>
+                      <th className="text-left text-xs text-zinc-500 px-4 py-3">Company</th>
+                      <th className="text-left text-xs text-zinc-500 px-4 py-3">Hooks Found</th>
+                      <th className="text-left text-xs text-zinc-500 px-4 py-3 w-24">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {campaign.prospects.map((p, idx) => (
+                      <tr key={idx} className="border-b border-zinc-800/50">
+                        <td className="px-4 py-3">
+                          <p className="text-white text-sm">{p.prospect_name}</p>
+                          <p className="text-zinc-500 text-xs">{p.prospect_title}</p>
+                        </td>
+                        <td className="px-4 py-3 text-zinc-400 text-sm">{p.company}</td>
+                        <td className="px-4 py-3">
+                          {p.hooks && p.hooks.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {p.hooks.slice(0, 2).map((h, i) => (
+                                <span key={i} className="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">{h}</span>
+                              ))}
+                              {p.hooks.length > 2 && <span className="text-[10px] text-zinc-500">+{p.hooks.length - 2}</span>}
+                            </div>
+                          ) : (
+                            <span className="text-zinc-600 text-xs">No hooks yet</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {p.researched ? (
+                            <span className="text-emerald-400 text-xs">✓ Done</span>
+                          ) : (
+                            <span className="text-zinc-500 text-xs">Pending</span>
+                          )}
+                        </td>
+                      </tr>
                     ))}
-                  </div>
-                )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
-          {/* DETAIL VIEW */}
-          {view === 'detail' && selectedCampaign && (
+          {/* STEP 3: BUILDER */}
+          {step === 'builder' && (
             <div className="space-y-6">
-              {/* Campaign Summary */}
+              {/* Variables */}
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-zinc-500 text-sm">{selectedCampaign.description}</p>
-                    <div className="flex items-center gap-2 mt-2">
-                      {selectedCampaign.touches?.map((t, i) => (
-                        <span key={i} className="text-xs px-2 py-1 bg-zinc-800 text-zinc-400 rounded flex items-center gap-1">
-                          {getChannelIcon(t.channel)} Day {t.day_number}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-white">{prospects.length}</p>
-                    <p className="text-xs text-zinc-500">prospects</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Prospects Section */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold text-white">Prospects</h3>
-                  <div className="flex gap-2">
-                    <input type="file" ref={fileInputRef} accept=".csv" onChange={handleFileUpload} className="hidden" />
-                    <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1 bg-zinc-800 text-zinc-300 rounded-lg text-xs hover:bg-zinc-700">📄 Upload CSV</button>
-                  </div>
-                </div>
-
-                {/* Add Prospect Form */}
-                <div className="grid grid-cols-6 gap-2 mb-4 p-3 bg-zinc-950 rounded-lg">
-                  <input type="text" value={newProspect.prospect_name} onChange={e => setNewProspect({...newProspect, prospect_name: e.target.value})} placeholder="Name" className="px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm" />
-                  <input type="text" value={newProspect.prospect_title} onChange={e => setNewProspect({...newProspect, prospect_title: e.target.value})} placeholder="Title" className="px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm" />
-                  <input type="text" value={newProspect.company} onChange={e => setNewProspect({...newProspect, company: e.target.value})} placeholder="Company" className="px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm" />
-                  <input type="email" value={newProspect.email} onChange={e => setNewProspect({...newProspect, email: e.target.value})} placeholder="Email" className="px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm" />
-                  <input type="text" value={newProspect.context} onChange={e => setNewProspect({...newProspect, context: e.target.value})} placeholder="Context" className="px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-white text-sm" />
-                  <button onClick={addProspect} className="px-3 py-1.5 bg-yellow-400 text-zinc-900 rounded text-sm font-medium">Add</button>
-                </div>
-
-                {/* Prospects List */}
-                {prospects.length > 0 && (
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {prospects.map((p, i) => (
-                      <div key={i} className="flex items-center justify-between p-2 bg-zinc-950 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <span className="text-white text-sm">{p.prospect_name}</span>
-                          <span className="text-zinc-500 text-xs">{p.prospect_title}</span>
-                          <span className="text-zinc-600 text-xs">@ {p.company}</span>
-                        </div>
-                        <button onClick={() => removeProspect(i)} className="text-zinc-600 hover:text-red-400 text-sm">×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Variables Section */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold text-white">Variables</h3>
-                </div>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {availableVariables.map(v => (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs text-zinc-500">Variables:</span>
+                  {campaign.variables.map(v => (
                     <span key={v} className="px-2 py-1 bg-zinc-800 text-zinc-300 rounded text-xs flex items-center gap-1">
                       {`{${v}}`}
-                      {!DEFAULT_VARIABLES.includes(v) && (
+                      {!['name', 'company', 'title'].includes(v) && (
                         <button onClick={() => removeVariable(v)} className="text-zinc-500 hover:text-red-400">×</button>
                       )}
                     </span>
                   ))}
+                  <input 
+                    type="text" 
+                    value={newVariable} 
+                    onChange={e => setNewVariable(e.target.value)} 
+                    placeholder="add variable" 
+                    className="px-2 py-1 bg-zinc-950 border border-zinc-700 rounded text-white text-xs w-24"
+                    onKeyDown={e => e.key === 'Enter' && addVariable()}
+                  />
                 </div>
-                <div className="flex gap-2">
-                  <input type="text" value={newVariable} onChange={e => setNewVariable(e.target.value)} placeholder="Add custom variable" className="flex-1 px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" onKeyDown={e => e.key === 'Enter' && addVariable()} />
-                  <button onClick={addVariable} className="px-3 py-1.5 bg-zinc-800 text-zinc-300 rounded-lg text-xs">Add</button>
-                </div>
-                <p className="text-[10px] text-zinc-600 mt-2">Variables will be replaced with prospect data or left as placeholders for manual editing</p>
               </div>
 
-              {/* Generate Button */}
-              {prospects.length > 0 && messages.length === 0 && (
-                <button onClick={generateMessages} disabled={generating} className="w-full py-3 bg-yellow-400 text-zinc-900 rounded-xl font-semibold hover:bg-yellow-300 disabled:opacity-50">
-                  {generating ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <span className="w-4 h-4 border-2 border-zinc-900/30 border-t-zinc-900 rounded-full animate-spin"></span>
-                      Generating {generatingProgress.current}/{generatingProgress.total}...
-                    </span>
-                  ) : (
-                    `Generate ${prospects.length * (selectedCampaign.touches?.length || 0)} Messages`
-                  )}
-                </button>
-              )}
-
-              {/* Generated Messages Grid */}
-              {messages.length > 0 && (
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-semibold text-white">Generated Messages</h3>
-                    <button onClick={() => setMessages([])} className="text-xs text-zinc-500 hover:text-white">Regenerate All</button>
-                  </div>
-                  
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-zinc-800">
-                          <th className="text-left text-xs text-zinc-500 pb-2 pr-4">Prospect</th>
-                          {selectedCampaign.touches?.map((t, i) => (
-                            <th key={i} className="text-left text-xs text-zinc-500 pb-2 px-2">
-                              {getChannelIcon(t.channel)} Touch {t.step_number}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {prospects.map((prospect, pIdx) => (
-                          <tr key={pIdx} className="border-b border-zinc-800/50">
-                            <td className="py-3 pr-4">
-                              <div className="text-white text-sm">{prospect.prospect_name}</div>
-                              <div className="text-zinc-500 text-xs">{prospect.company}</div>
-                            </td>
-                            {selectedCampaign.touches?.map((_, tIdx) => {
-                              const msg = messages.find(m => m.prospect_id === pIdx && m.touch_id === tIdx)
-                              const msgIdx = messages.findIndex(m => m.prospect_id === pIdx && m.touch_id === tIdx)
-                              return (
-                                <td key={tIdx} className="py-3 px-2">
-                                  {msg && (
-                                    <div className="relative group">
-                                      <div className="p-2 bg-zinc-950 rounded-lg text-xs text-zinc-300 max-w-xs">
-                                        <p className="line-clamp-3">{msg.generated_message}</p>
-                                      </div>
-                                      <button onClick={() => setEditingMessage({...msg, prospect_id: pIdx, touch_id: tIdx})} className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 px-1.5 py-0.5 bg-yellow-400 text-zinc-900 rounded text-[10px]">Edit</button>
-                                    </div>
-                                  )}
-                                </td>
-                              )
-                            })}
-                          </tr>
+              {/* Touches */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-white">Campaign Steps</h3>
+                  <div className="relative">
+                    <button onClick={() => setShowSuggestions(!showSuggestions)} className="px-3 py-1.5 bg-yellow-400/20 text-yellow-400 rounded-lg text-sm hover:bg-yellow-400/30">+ Add Step</button>
+                    {showSuggestions && (
+                      <div className="absolute right-0 top-full mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-10 w-48">
+                        {CHANNELS.map(c => (
+                          <button 
+                            key={c.value}
+                            onClick={() => { addTouch(c.value); setShowSuggestions(false) }}
+                            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700 flex items-center gap-2"
+                          >
+                            {c.icon} {c.label}
+                          </button>
                         ))}
-                      </tbody>
-                    </table>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+
+                {campaign.touches.length === 0 ? (
+                  <div className="text-center py-8 border border-dashed border-zinc-700 rounded-lg">
+                    <p className="text-zinc-500 text-sm">No steps yet. Add your first step above.</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Touch tabs */}
+                    <div className="flex gap-2 mb-4 overflow-x-auto">
+                      {campaign.touches.map((t, i) => (
+                        <button 
+                          key={i}
+                          onClick={() => setSelectedTouch(i)}
+                          className={`px-3 py-1.5 rounded-lg text-sm whitespace-nowrap flex items-center gap-2 ${
+                            selectedTouch === i ? 'bg-yellow-400 text-zinc-900' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                          }`}
+                        >
+                          {getChannelIcon(t.channel)} Day {t.day_number}
+                          {campaign.touches.length > 1 && (
+                            <span onClick={(e) => { e.stopPropagation(); removeTouch(i) }} className="hover:text-red-500">×</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Touch editor */}
+                    {campaign.touches[selectedTouch] && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-xs text-zinc-500 block mb-1">Channel</label>
+                            <select 
+                              value={campaign.touches[selectedTouch].channel}
+                              onChange={e => updateTouch('channel', e.target.value)}
+                              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-lg text-white text-sm"
+                            >
+                              {CHANNELS.map(c => <option key={c.value} value={c.value}>{c.icon} {c.label}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-zinc-500 block mb-1">Day</label>
+                            <input 
+                              type="number"
+                              value={campaign.touches[selectedTouch].day_number}
+                              onChange={e => updateTouch('day_number', parseInt(e.target.value) || 1)}
+                              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-lg text-white text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-zinc-500 block mb-1">Goal</label>
+                            <input 
+                              type="text"
+                              value={campaign.touches[selectedTouch].goal}
+                              onChange={e => updateTouch('goal', e.target.value)}
+                              placeholder="Get reply"
+                              className="w-full px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-lg text-white text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs text-zinc-500">Message Template</label>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={generateTemplate}
+                                disabled={generating}
+                                className="px-2 py-1 text-xs text-yellow-400 hover:bg-yellow-400/20 rounded disabled:opacity-50"
+                              >
+                                {generating ? '...' : '✨ AI Generate'}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex gap-1 mb-2 flex-wrap">
+                            {campaign.variables.map(v => (
+                              <button 
+                                key={v}
+                                onClick={() => updateTouch('template', campaign.touches[selectedTouch].template + `{${v}}`)}
+                                className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded text-[10px] hover:text-yellow-400"
+                              >
+                                {`{${v}}`}
+                              </button>
+                            ))}
+                          </div>
+                          <textarea 
+                            value={campaign.touches[selectedTouch].template}
+                            onChange={e => updateTouch('template', e.target.value)}
+                            placeholder="Hi {name}, I noticed {company} recently {achievement}..."
+                            className="w-full px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-lg text-white text-sm h-32 resize-none font-mono"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Contacts with variables */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-white">Contacts & Variables</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-zinc-950 border-b border-zinc-800">
+                        <th className="text-left text-xs text-zinc-500 px-3 py-2">Name</th>
+                        <th className="text-left text-xs text-zinc-500 px-3 py-2">Company</th>
+                        {campaign.variables.filter(v => !['name', 'company', 'title'].includes(v)).map(v => (
+                          <th key={v} className="text-left text-xs text-zinc-500 px-3 py-2">{v}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {campaign.prospects.slice(0, 10).map((p, idx) => (
+                        <tr key={idx} className="border-b border-zinc-800/50">
+                          <td className="px-3 py-2 text-white text-sm">{p.prospect_name}</td>
+                          <td className="px-3 py-2 text-zinc-400 text-sm">{p.company}</td>
+                          {campaign.variables.filter(v => !['name', 'company', 'title'].includes(v)).map(v => (
+                            <td key={v} className="px-3 py-2">
+                              <input 
+                                type="text"
+                                value={p.variables[v] || ''}
+                                onChange={e => updateProspectVariable(idx, v, e.target.value)}
+                                className="w-full bg-transparent text-zinc-400 text-sm focus:ring-1 focus:ring-yellow-400 rounded px-1"
+                                placeholder={`{${v}}`}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {campaign.prospects.length > 10 && (
+                    <div className="px-4 py-2 text-zinc-500 text-xs">+ {campaign.prospects.length - 10} more contacts</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button 
+                  onClick={() => { saveCampaign(); setStep('export') }}
+                  disabled={campaign.touches.length === 0}
+                  className="px-6 py-2 bg-yellow-400 text-zinc-900 rounded-lg font-medium hover:bg-yellow-300 disabled:opacity-50"
+                >
+                  Continue to Export →
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Edit Message Modal */}
-          {editingMessage && (
-            <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setEditingMessage(null)}>
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-2xl" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-                  <h3 className="text-white font-semibold">Edit Message</h3>
-                  <button onClick={() => setEditingMessage(null)} className="text-zinc-500 hover:text-white text-xl">×</button>
+          {/* STEP 4: EXPORT */}
+          {step === 'export' && (
+            <div className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* Export contacts */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                  <span className="text-3xl block mb-3">📋</span>
+                  <h3 className="text-lg font-semibold text-white mb-2">Contacts CSV</h3>
+                  <p className="text-zinc-500 text-sm mb-4">{campaign.prospects.length} contacts with {campaign.variables.length} variables</p>
+                  <button onClick={exportContacts} className="w-full py-2 bg-emerald-500 text-white rounded-lg font-medium hover:bg-emerald-400">
+                    📥 Download CSV
+                  </button>
                 </div>
-                <div className="p-4">
-                  <div className="mb-4">
-                    <label className="text-xs text-zinc-500 block mb-1">Message</label>
-                    <textarea
-                      value={messages.find(m => m.prospect_id === editingMessage.prospect_id && m.touch_id === editingMessage.touch_id)?.generated_message || ''}
-                      onChange={e => {
-                        const idx = messages.findIndex(m => m.prospect_id === editingMessage.prospect_id && m.touch_id === editingMessage.touch_id)
-                        if (idx >= 0) updateMessageText(idx, e.target.value)
-                      }}
-                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm h-40 resize-none"
-                    />
-                  </div>
-                  <div className="mb-4">
-                    <label className="text-xs text-zinc-500 block mb-2">Variables Used</label>
-                    <div className="space-y-2">
-                      {Object.entries(editingMessage.variables_used || {}).map(([key, value]) => (
-                        <div key={key} className="flex items-center gap-2">
-                          <span className="text-xs text-yellow-400 w-24">{`{${key}}`}</span>
-                          <input
-                            type="text"
-                            value={value}
-                            onChange={e => {
-                              const idx = messages.findIndex(m => m.prospect_id === editingMessage.prospect_id && m.touch_id === editingMessage.touch_id)
-                              if (idx >= 0) updateMessageVariable(idx, key, e.target.value)
-                            }}
-                            className="flex-1 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-sm"
-                          />
+
+                {/* Messages preview */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                  <span className="text-3xl block mb-3">💬</span>
+                  <h3 className="text-lg font-semibold text-white mb-2">Campaign Messages</h3>
+                  <p className="text-zinc-500 text-sm mb-4">{campaign.touches.length} steps · Copy messages below</p>
+                  <button onClick={() => setStep('builder')} className="w-full py-2 bg-zinc-800 text-zinc-300 rounded-lg hover:bg-zinc-700">
+                    ← Edit Campaign
+                  </button>
+                </div>
+              </div>
+
+              {/* Messages to copy */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-zinc-800">
+                  <h3 className="text-sm font-medium text-white">Messages to Copy</h3>
+                </div>
+                
+                {/* Touch selector */}
+                <div className="px-4 py-3 border-b border-zinc-800 flex gap-2">
+                  {campaign.touches.map((t, i) => (
+                    <button 
+                      key={i}
+                      onClick={() => setSelectedTouch(i)}
+                      className={`px-3 py-1.5 rounded-lg text-sm ${selectedTouch === i ? 'bg-yellow-400 text-zinc-900' : 'bg-zinc-800 text-zinc-400'}`}
+                    >
+                      {getChannelIcon(t.channel)} Step {t.step_number}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="divide-y divide-zinc-800 max-h-96 overflow-y-auto">
+                  {campaign.prospects.map((p, pIdx) => {
+                    const msg = renderMessage(campaign.touches[selectedTouch]?.template || '', p)
+                    const isCopied = copiedIdx === pIdx * 100 + selectedTouch
+                    
+                    return (
+                      <div key={pIdx} className="p-4 hover:bg-zinc-800/30">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <span className="text-white text-sm font-medium">{p.prospect_name}</span>
+                            <span className="text-zinc-500 text-xs ml-2">@ {p.company}</span>
+                          </div>
+                          <button 
+                            onClick={() => copyMessage(pIdx, selectedTouch)}
+                            className={`px-3 py-1 text-xs rounded ${isCopied ? 'bg-emerald-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
+                          >
+                            {isCopied ? '✓ Copied' : '📋 Copy'}
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex justify-end">
-                    <button onClick={() => setEditingMessage(null)} className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium">Done</button>
-                  </div>
+                        <p className="text-zinc-300 text-sm whitespace-pre-wrap">{msg}</p>
+                        {msg.includes('{') && (
+                          <div className="mt-2 flex gap-1">
+                            {msg.match(/\{[^}]+\}/g)?.map((v, i) => (
+                              <span key={i} className="text-[10px] px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded">{v}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             </div>
