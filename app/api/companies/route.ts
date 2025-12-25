@@ -5,25 +5,31 @@ export async function GET() {
   try {
     const result = await sql`
       SELECT * FROM saved_companies 
-      ORDER BY has_new_signals DESC, updated_at DESC
+      ORDER BY updated_at DESC
     `
     
-    return NextResponse.json({ companies: result.rows })
+    const response = NextResponse.json({ companies: result.rows })
+    response.headers.set('Cache-Control', 'no-store, max-age=0')
+    return response
   } catch (error) {
-    console.error('Error fetching companies:', error)
+    console.error('Error:', error)
     return NextResponse.json({ companies: [] })
   }
 }
 
 export async function DELETE(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const id = searchParams.get('id')
-
   try {
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get('id')
+    
+    if (!id) {
+      return NextResponse.json({ error: 'ID required' }, { status: 400 })
+    }
+    
     await sql`DELETE FROM saved_companies WHERE id = ${id}`
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Error deleting company:', error)
-    return NextResponse.json({ success: false }, { status: 500 })
+    console.error('Error:', error)
+    return NextResponse.json({ error: 'Failed to delete' }, { status: 500 })
   }
 }

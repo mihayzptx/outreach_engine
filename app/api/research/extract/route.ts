@@ -1,261 +1,295 @@
 import { NextResponse } from 'next/server'
+import { sql } from '@vercel/postgres'
 
-interface ExtractedInfo {
-  employee_count?: string
-  revenue_range?: string
-  funding_stage?: string
-  funding_amount?: string
-  last_funding_date?: string
-  founded_year?: number
-  headquarters?: string
-  website?: string
-  is_hiring?: boolean
-  buyer_intent?: boolean
-  country?: string
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY
+
+interface Signal {
+  type: string
+  category: 'funding' | 'hiring' | 'leadership' | 'expansion' | 'tech_stack' | 'awards' | 'acquisition' | 'news'
+  priority: 'high' | 'medium' | 'low'
+  title: string
+  detail: string
+  date?: string
+  source?: string
 }
 
-function extractCompanyInfo(text: string, companyName: string): ExtractedInfo {
-  const info: ExtractedInfo = {}
-  const lowerText = text.toLowerCase()
-  
-  // Employee count - multiple patterns
-  const empPatterns = [
-    /(\d{1,3}(?:,\d{3})*)\s*(?:\+\s*)?(?:employees|workers|staff|people|team members)/i,
-    /(?:employs?|has|with|of)\s*(?:about|approximately|around|over|more than|nearly)?\s*(\d{1,3}(?:,\d{3})*)\s*(?:employees|people|workers|staff)/i,
-    /(?:team of|staff of|workforce of|headcount of)\s*(\d{1,3}(?:,\d{3})*)/i,
-    /(\d+)\s*-\s*(\d+)\s*employees/i,
-    /(?:company size|size)[\s:]+(\d{1,3}(?:,\d{3})*)/i
-  ]
-  for (const pattern of empPatterns) {
-    const match = text.match(pattern)
-    if (match) {
-      const num = parseInt((match[2] || match[1]).replace(/,/g, ''))
-      if (num > 0 && num < 1000000) {
-        if (num <= 10) info.employee_count = '1-10'
-        else if (num <= 50) info.employee_count = '11-50'
-        else if (num <= 200) info.employee_count = '51-200'
-        else if (num <= 500) info.employee_count = '201-500'
-        else if (num <= 1000) info.employee_count = '501-1000'
-        else if (num <= 5000) info.employee_count = '1001-5000'
-        else info.employee_count = '5000+'
-        break
-      }
-    }
+// Signal detection patterns
+const SIGNAL_PATTERNS = {
+  funding: {
+    patterns: [
+      /(?:raised|secures?|closes?|announces?)\s+\$?([\d.]+)\s*(million|m|billion|b)/i,
+      /series\s+([a-d])/i,
+      /seed\s+(?:round|funding)/i,
+      /(?:funding|investment)\s+(?:round|of)\s+\$?([\d.]+)/i
+    ],
+    priority: 'high' as const,
+    keywords: ['funding', 'raised', 'investment', 'series', 'seed', 'venture', 'capital']
+  },
+  hiring: {
+    patterns: [
+      /hiring\s+(?:for\s+)?(\d+)\s+(?:new\s+)?(?:positions?|roles?|engineers?)/i,
+      /(?:devops|platform|sre|infrastructure|cloud)\s+engineer/i,
+      /growing\s+(?:the\s+)?(?:engineering\s+)?team/i
+    ],
+    priority: 'high' as const,
+    keywords: ['hiring', 'job', 'career', 'engineer', 'devops', 'platform', 'sre', 'infrastructure']
+  },
+  leadership: {
+    patterns: [
+      /(?:appoints?|names?|hires?|promotes?)\s+(?:new\s+)?(?:cto|ceo|vp|chief|head)/i,
+      /(?:joins?\s+as|named)\s+(?:cto|ceo|vp|chief|head)/i,
+      /new\s+(?:cto|ceo|vp|chief|head\s+of)/i
+    ],
+    priority: 'medium' as const,
+    keywords: ['appoint', 'hire', 'promote', 'cto', 'ceo', 'vp', 'chief', 'head of', 'joins']
+  },
+  expansion: {
+    patterns: [
+      /(?:opens?|launches?|expands?\s+to)\s+(?:new\s+)?(?:office|headquarters|location)/i,
+      /(?:enters?|expands?\s+(?:into|to))\s+(?:new\s+)?(?:market|region)/i,
+      /(?:international|global)\s+expansion/i
+    ],
+    priority: 'medium' as const,
+    keywords: ['expand', 'office', 'location', 'market', 'international', 'global', 'launch']
+  },
+  acquisition: {
+    patterns: [
+      /(?:acquires?|acquisition|bought|purchases?|merges?\s+with)/i,
+      /(?:acquired\s+by|merger\s+with)/i
+    ],
+    priority: 'high' as const,
+    keywords: ['acquire', 'acquisition', 'merger', 'merge', 'bought', 'purchase']
+  },
+  awards: {
+    patterns: [
+      /(?:wins?|awarded|receives?|named)\s+(?:best|top|award)/i,
+      /(?:recognized|ranked)\s+(?:as|among)/i,
+      /(?:inc\.|forbes|deloitte|gartner)\s+(?:500|100|fastest)/i
+    ],
+    priority: 'low' as const,
+    keywords: ['award', 'win', 'recognized', 'ranked', 'best', 'top', 'fastest']
+  },
+  tech_stack: {
+    patterns: [
+      /(?:using|built\s+(?:on|with)|powered\s+by|migrat(?:ed?|ing)\s+to)\s+(aws|azure|gcp|kubernetes|terraform|docker)/i,
+      /(?:aws|azure|gcp|kubernetes|k8s|terraform|docker|jenkins|github\s+actions)/i
+    ],
+    priority: 'medium' as const,
+    keywords: ['aws', 'azure', 'gcp', 'kubernetes', 'k8s', 'terraform', 'docker', 'devops', 'ci/cd', 'jenkins']
   }
-  
-  // Revenue - multiple patterns
-  const revPatterns = [
-    /(?:revenue|sales|ARR|annual revenue|yearly revenue)\s*(?:of|:)?\s*\$?\s*(\d+(?:\.\d+)?)\s*(million|billion|m|b|M|B|mn|bn)/i,
-    /\$(\d+(?:\.\d+)?)\s*(million|billion|m|b|M|B|mn|bn)\s*(?:in\s*)?(?:revenue|sales|ARR)/i,
-    /(?:generates?|reported|earned)\s*\$?\s*(\d+(?:\.\d+)?)\s*(million|billion|m|b)\s*(?:in\s*)?(?:revenue|annually)/i,
-    /(?:valued at|valuation of)\s*\$?\s*(\d+(?:\.\d+)?)\s*(million|billion|m|b)/i
-  ]
-  for (const pattern of revPatterns) {
-    const match = text.match(pattern)
-    if (match) {
-      const num = parseFloat(match[1])
-      const unit = match[2].toLowerCase()
-      let millions = (unit.includes('b') || unit === 'bn') ? num * 1000 : num
-      if (millions < 1) info.revenue_range = '<$1M'
-      else if (millions < 10) info.revenue_range = '$1M-$10M'
-      else if (millions < 50) info.revenue_range = '$10M-$50M'
-      else if (millions < 100) info.revenue_range = '$50M-$100M'
-      else if (millions < 500) info.revenue_range = '$100M-$500M'
-      else info.revenue_range = '>$500M'
-      break
-    }
-  }
-  
-  // Funding amount
-  const fundPatterns = [
-    /(?:raised|secured|closed|announced|received)\s*(?:a\s*)?\$(\d+(?:\.\d+)?)\s*(million|billion|m|b|M|B|k|K|mn|bn)/i,
-    /\$(\d+(?:\.\d+)?)\s*(million|billion|m|b|M|B|mn|bn)\s*(?:funding|round|investment|series|seed)/i,
-    /(?:funding|investment|round)\s*(?:of|:)\s*\$(\d+(?:\.\d+)?)\s*(million|billion|m|b)/i
-  ]
-  for (const pattern of fundPatterns) {
-    const match = text.match(pattern)
-    if (match) {
-      const num = parseFloat(match[1])
-      const unit = match[2].toLowerCase()
-      if (unit === 'k') info.funding_amount = `$${num}K`
-      else if (unit.includes('b') || unit === 'bn') info.funding_amount = `$${num}B`
-      else info.funding_amount = `$${num}M`
-      break
-    }
-  }
-  
-  // Funding stage - check in order of specificity
-  if (lowerText.includes('series f') || lowerText.includes('series g')) info.funding_stage = 'Series D+'
-  else if (lowerText.includes('series e')) info.funding_stage = 'Series D+'
-  else if (lowerText.includes('series d')) info.funding_stage = 'Series D+'
-  else if (lowerText.includes('series c')) info.funding_stage = 'Series C'
-  else if (lowerText.includes('series b')) info.funding_stage = 'Series B'
-  else if (lowerText.includes('series a')) info.funding_stage = 'Series A'
-  else if (lowerText.includes('pre-seed') || lowerText.includes('preseed')) info.funding_stage = 'Pre-Seed'
-  else if (lowerText.includes('seed round') || lowerText.includes('seed funding') || lowerText.includes('seed stage')) info.funding_stage = 'Seed'
-  else if (lowerText.includes('private equity') || lowerText.includes(' pe ')) info.funding_stage = 'Private Equity'
-  else if (lowerText.includes('ipo') || lowerText.includes('went public') || lowerText.includes('publicly traded') || lowerText.includes('nasdaq') || lowerText.includes('nyse')) info.funding_stage = 'IPO/Public'
-  
-  // Founded year
-  const yearPatterns = [
-    /(?:founded|established|started|launched|formed|created)\s*(?:in\s*)?(\d{4})/i,
-    /(?:since|from|in operation since)\s*(\d{4})/i,
-    /(\d{4})\s*(?:founded|established|startup)/i
-  ]
-  for (const pattern of yearPatterns) {
-    const match = text.match(pattern)
-    if (match) {
-      const year = parseInt(match[1])
-      if (year >= 1900 && year <= new Date().getFullYear()) {
-        info.founded_year = year
-        break
-      }
-    }
-  }
-  
-  // Location/Country - expanded patterns
-  const locPatterns = [
-    /(?:headquartered|based|located|hq)\s*(?:in|at)\s*([A-Z][a-zA-Z\s,\.]+)/i,
-    /(?:headquarters|head office|main office)\s*(?:in|:)\s*([A-Z][a-zA-Z\s,\.]+)/i
-  ]
-  for (const pattern of locPatterns) {
-    const match = text.match(pattern)
-    if (match) {
-      let location = match[1].trim().substring(0, 100)
-      // Clean up
-      location = location.replace(/[,\.]$/, '').trim()
-      info.headquarters = location
-      
-      const loc = location.toLowerCase()
-      // US states
-      if (loc.includes('united states') || loc.includes('usa') || loc.includes('u.s.') ||
-          /\b(california|new york|texas|florida|washington|colorado|georgia|massachusetts|illinois|arizona|nevada|oregon|utah|virginia|north carolina|ohio|michigan|pennsylvania|new jersey|maryland|connecticut|boston|san francisco|los angeles|seattle|austin|denver|atlanta|chicago|miami|nyc|la|sf|bay area)\b/i.test(loc)) {
-        info.country = 'United States'
-      } else if (loc.includes('uk') || loc.includes('united kingdom') || loc.includes('london') || loc.includes('england') || loc.includes('manchester') || loc.includes('birmingham')) {
-        info.country = 'United Kingdom'
-      } else if (loc.includes('canada') || loc.includes('toronto') || loc.includes('vancouver') || loc.includes('montreal')) {
-        info.country = 'Canada'
-      } else if (loc.includes('germany') || loc.includes('berlin') || loc.includes('munich') || loc.includes('frankfurt')) {
-        info.country = 'Germany'
-      } else if (loc.includes('australia') || loc.includes('sydney') || loc.includes('melbourne')) {
-        info.country = 'Australia'
-      } else if (loc.includes('france') || loc.includes('paris')) {
-        info.country = 'France'
-      } else if (loc.includes('israel') || loc.includes('tel aviv')) {
-        info.country = 'Israel'
-      } else if (loc.includes('singapore')) {
-        info.country = 'Singapore'
-      } else if (loc.includes('ireland') || loc.includes('dublin')) {
-        info.country = 'Ireland'
-      } else if (loc.includes('netherlands') || loc.includes('amsterdam')) {
-        info.country = 'Netherlands'
-      }
-      break
-    }
-  }
-  
-  // Hiring signals
-  info.is_hiring = lowerText.includes('hiring') || lowerText.includes('job opening') || 
-                   lowerText.includes('open position') || lowerText.includes('join our team') ||
-                   lowerText.includes('careers page') || lowerText.includes("we're growing") ||
-                   lowerText.includes('looking for talent') || lowerText.includes('recruiting')
-  
-  // Buyer intent signals
-  info.buyer_intent = lowerText.includes('looking for vendor') || lowerText.includes('seeking partner') ||
-                      lowerText.includes('evaluating solution') || lowerText.includes('rfp') ||
-                      lowerText.includes('request for proposal') || lowerText.includes('digital transformation') ||
-                      lowerText.includes('modernization') || lowerText.includes('cloud migration')
-  
-  return info
 }
 
-function calculateGrade(info: ExtractedInfo, title?: string): { grade: string, score: number } {
-  let total = 0, max = 0
-  
-  // P3 (3x)
-  if (info.buyer_intent) { total += 5 * 3 }; max += 15
-  if (info.is_hiring) { total += 5 * 3 }; max += 15
-  if (info.funding_stage) {
-    const s = info.funding_stage.toLowerCase()
-    let pts = s.includes('series a') || s.includes('series b') ? 5 : 
-              s.includes('series c') || s.includes('private') ? 4 : 
-              s.includes('seed') ? 3 : 2
-    total += pts * 3; max += 15
+function detectSignals(text: string, title: string, url: string): Signal[] {
+  const signals: Signal[] = []
+  const combinedText = `${title} ${text}`.toLowerCase()
+
+  for (const [category, config] of Object.entries(SIGNAL_PATTERNS)) {
+    // Check if any keywords present
+    const hasKeyword = config.keywords.some(kw => combinedText.includes(kw.toLowerCase()))
+    if (!hasKeyword) continue
+
+    // Check patterns
+    for (const pattern of config.patterns) {
+      const match = combinedText.match(pattern)
+      if (match) {
+        let detail = ''
+        
+        if (category === 'funding') {
+          const amountMatch = combinedText.match(/\$?([\d.]+)\s*(million|m|billion|b)/i)
+          const seriesMatch = combinedText.match(/series\s+([a-d])/i)
+          if (amountMatch) {
+            const amount = amountMatch[1]
+            const unit = amountMatch[2].toLowerCase().startsWith('b') ? 'B' : 'M'
+            detail = `$${amount}${unit}`
+          }
+          if (seriesMatch) {
+            detail = `Series ${seriesMatch[1].toUpperCase()}${detail ? ` - ${detail}` : ''}`
+          }
+          if (!detail) detail = 'Funding announced'
+        } else if (category === 'hiring') {
+          const roleMatch = combinedText.match(/(?:devops|platform|sre|infrastructure|cloud|backend|frontend)\s+engineer/i)
+          detail = roleMatch ? roleMatch[0] : 'Engineering positions open'
+        } else if (category === 'leadership') {
+          const roleMatch = combinedText.match(/(?:cto|ceo|vp\s+of\s+\w+|chief\s+\w+\s+officer|head\s+of\s+\w+)/i)
+          detail = roleMatch ? `New ${roleMatch[0]}` : 'Leadership change'
+        } else if (category === 'acquisition') {
+          detail = combinedText.includes('acquired by') ? 'Was acquired' : 'Made acquisition'
+        } else if (category === 'tech_stack') {
+          const techMatch = combinedText.match(/(aws|azure|gcp|kubernetes|k8s|terraform|docker)/i)
+          detail = techMatch ? techMatch[0].toUpperCase() : 'Cloud/DevOps tech'
+        } else {
+          detail = title.slice(0, 100)
+        }
+
+        signals.push({
+          type: category,
+          category: category as Signal['category'],
+          priority: config.priority,
+          title: title.slice(0, 150),
+          detail,
+          source: url
+        })
+        break // One signal per category per result
+      }
+    }
   }
-  if (info.funding_amount) { total += 4 * 3; max += 15 }
-  if (info.revenue_range) {
-    const r = info.revenue_range
-    let pts = r.includes('$1M-$10M') || r.includes('$10M-$50M') ? 5 : r.includes('$50M') ? 3 : 2
-    total += pts * 3; max += 15
-  }
-  
-  // P2 (2x)
-  if (title) {
-    const t = title.toLowerCase()
-    let pts = t.includes('cto') || t.includes('cio') || (t.includes('vp') && (t.includes('tech') || t.includes('engineer'))) ? 5 :
-              t.includes('ceo') || t.includes('director') || t.includes('head') || t.includes('chief') ? 4 : 
-              t.includes('manager') || t.includes('founder') || t.includes('owner') ? 3 : 2
-    total += pts * 2; max += 10
-  }
-  if (info.country) {
-    const c = info.country.toLowerCase()
-    let pts = c.includes('united states') || c.includes('uk') || c.includes('united kingdom') || c.includes('canada') ? 5 :
-              c.includes('australia') || c.includes('israel') || c.includes('singapore') || c.includes('ireland') ? 4 : 3
-    total += pts * 2; max += 10
-  }
-  if (info.employee_count) {
-    const e = info.employee_count
-    let pts = e.includes('11-50') || e.includes('51-200') || e.includes('201-500') ? 5 :
-              e.includes('501-1000') ? 4 : 3
-    total += pts * 2; max += 10
-  }
-  
-  // P1 (1x)
-  if (info.founded_year) {
-    const age = new Date().getFullYear() - info.founded_year
-    let pts = age >= 5 && age < 15 ? 5 : age >= 3 && age < 30 ? 3 : 1
-    total += pts; max += 5
-  }
-  
-  const pct = max > 0 ? Math.round((total / max) * 100) : 0
-  const grade = pct >= 81 ? 'A' : pct >= 61 ? 'B' : pct >= 41 ? 'C' : pct >= 21 ? 'D' : 'E'
-  return { grade, score: total }
+
+  return signals
 }
 
 export async function POST(request: Request) {
-  const { researchText, companyName, prospectTitle, sources } = await request.json()
-
   try {
-    const extracted = extractCompanyInfo(researchText || '', companyName || '')
-    const { grade, score } = calculateGrade(extracted, prospectTitle)
-    
-    const researchLinks = (sources || []).map((url: string) => {
+    const { company, prospectName, forceRefresh } = await request.json()
+
+    if (!company) {
+      return NextResponse.json({ error: 'Company name required' }, { status: 400 })
+    }
+
+    // Check cache first (unless force refresh)
+    if (!forceRefresh) {
+      const cached = await sql`
+        SELECT * FROM prospect_research 
+        WHERE LOWER(company) = LOWER(${company})
+        AND researched_at > NOW() - INTERVAL '7 days'
+        ORDER BY researched_at DESC LIMIT 1
+      `
+      if (cached.rows.length > 0) {
+        return NextResponse.json({
+          cached: true,
+          research: cached.rows[0].research_data,
+          signals: cached.rows[0].signals,
+          researched_at: cached.rows[0].researched_at
+        })
+      }
+    }
+
+    if (!TAVILY_API_KEY) {
+      return NextResponse.json({ error: 'Tavily API key not configured' }, { status: 500 })
+    }
+
+    // Search queries for comprehensive coverage
+    const queries = [
+      `${company} news funding 2024 2025`,
+      `${company} hiring engineering jobs`,
+      `${company} leadership executive announcement`
+    ]
+
+    const allResults: any[] = []
+    const allSignals: Signal[] = []
+
+    for (const query of queries) {
       try {
-        return { url, source: new URL(url).hostname.replace('www.', ''), usedAt: new Date().toISOString() }
-      } catch { return { url, source: url, usedAt: new Date().toISOString() } }
+        const response = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: TAVILY_API_KEY,
+            query,
+            search_depth: 'basic',
+            max_results: 5,
+            include_answer: false
+          })
+        })
+
+        const data = await response.json()
+        
+        if (data.results) {
+          for (const result of data.results) {
+            allResults.push({
+              title: result.title,
+              content: result.content,
+              url: result.url,
+              score: result.score
+            })
+            
+            const signals = detectSignals(result.content || '', result.title || '', result.url || '')
+            allSignals.push(...signals)
+          }
+        }
+      } catch (e) {
+        console.error('Search query failed:', query, e)
+      }
+    }
+
+    // Deduplicate signals by category
+    const uniqueSignals: Signal[] = []
+    const seenCategories = new Set<string>()
+    
+    // Sort by priority first
+    const priorityOrder = { high: 0, medium: 1, low: 2 }
+    allSignals.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])
+    
+    for (const signal of allSignals) {
+      if (!seenCategories.has(signal.category)) {
+        seenCategories.add(signal.category)
+        uniqueSignals.push(signal)
+      }
+    }
+
+    // Deduplicate results by URL
+    const uniqueResults = allResults.filter((r, i, arr) => 
+      arr.findIndex(x => x.url === r.url) === i
+    ).slice(0, 10)
+
+    // Store in database
+    const researchData = {
+      company,
+      results: uniqueResults,
+      query_count: queries.length,
+      result_count: uniqueResults.length
+    }
+
+    const signalsData = {
+      detected: uniqueSignals,
+      count: uniqueSignals.length,
+      high_priority: uniqueSignals.filter(s => s.priority === 'high').length
+    }
+
+    await sql`
+      INSERT INTO prospect_research (company, research_data, signals)
+      VALUES (${company}, ${JSON.stringify(researchData)}, ${JSON.stringify(signalsData)})
+    `
+
+    return NextResponse.json({
+      cached: false,
+      research: researchData,
+      signals: signalsData,
+      researched_at: new Date().toISOString()
     })
 
-    return NextResponse.json({ 
-      success: true,
-      extractedInfo: extracted,
-      grading: { 
-        grade, 
-        score, 
-        data: {
-          buyerIntent: extracted.buyer_intent,
-          activelyHiring: extracted.is_hiring,
-          fundingStage: extracted.funding_stage,
-          fundingAmount: extracted.funding_amount,
-          revenueRange: extracted.revenue_range,
-          companySize: extracted.employee_count,
-          geography: extracted.country,
-          yearFounded: extracted.founded_year
-        }
-      },
-      researchLinks
+  } catch (error: any) {
+    console.error('Research error:', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+}
+
+// GET endpoint to retrieve cached research
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const company = searchParams.get('company')
+
+    if (!company) {
+      return NextResponse.json({ error: 'Company required' }, { status: 400 })
+    }
+
+    const result = await sql`
+      SELECT * FROM prospect_research 
+      WHERE LOWER(company) = LOWER(${company})
+      ORDER BY researched_at DESC LIMIT 1
+    `
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ found: false })
+    }
+
+    return NextResponse.json({
+      found: true,
+      research: result.rows[0].research_data,
+      signals: result.rows[0].signals,
+      researched_at: result.rows[0].researched_at
     })
-  } catch (error) {
-    console.error('Error:', error)
-    return NextResponse.json({ success: false }, { status: 500 })
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

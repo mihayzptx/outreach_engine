@@ -19,14 +19,17 @@ export async function POST(request: Request) {
       'lead_grade', 'lead_score', 'grading_data', 'research_links_data',
       'founded_year', 'headquarters', 'linkedin_url', 'funding_stage', 
       'funding_amount', 'last_funding_date', 'is_hiring', 'buyer_intent',
-      'contact_linkedin', 'contact_connections', 'contact_years_position', 'contact_years_company'
+      'contact_linkedin', 'contact_connections', 'contact_years_position', 'contact_years_company',
+      'is_archived', 'archived_at'
     ]
+
+    // Fields that need JSON stringification
+    const jsonFields = ['grading_data', 'research_links_data', 'labels']
 
     for (const [key, value] of Object.entries(updates)) {
       if (allowedFields.includes(key) && value !== undefined) {
         fields.push(`${key} = $${paramIndex++}`)
-        // Handle JSONB fields
-        if (key === 'grading_data' || key === 'research_links_data') {
+        if (jsonFields.includes(key) && typeof value !== 'string') {
           values.push(JSON.stringify(value))
         } else {
           values.push(value)

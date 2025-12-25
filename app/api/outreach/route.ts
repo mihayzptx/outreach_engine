@@ -17,7 +17,8 @@ const defaultSettings = {
   topP: 0.9,
   frequencyPenalty: 0.3,
   presencePenalty: 0.3,
-  localModel: 'techstack-outreach',
+  localModel: 'llama3.2',
+  localEndpoint: 'http://localhost:11434',
   cloudModel: 'llama-3.3-70b-versatile',
   systemPromptBase: 'You write cold outreach for Tech-stack.io. Your messages are short, specific, and never generic.',
   bannedPhrases: [
@@ -112,10 +113,12 @@ export async function POST(request: Request) {
     useLocal,
     useWebResearch,
     adjustment,
-    userId
+    userId,
+    customInstructions,
+    campaignId
   } = await request.json()
 
-  console.log(useLocal ? '🏠 LOCAL' : '☁️ CLOUD', useWebResearch ? '+ 🔍 RESEARCH' : '')
+  console.log(useLocal ? '🏠 LOCAL' : '☁️ CLOUD', useWebResearch ? '+ 🔍 RESEARCH' : '', campaignId ? `📋 Campaign: ${campaignId}` : '')
 
   // Get settings from database
   const settings = await getSettings()
@@ -232,6 +235,7 @@ ${goodOpenersText}
 
 ${targetResult ? `## TARGET OUTCOME: ${targetResult}` : ''}
 ${sources ? `## REFERENCE SOURCES: ${sources}` : ''}
+${customInstructions ? `## CUSTOM INSTRUCTIONS: ${customInstructions}` : ''}
 
 OUTPUT: Message body only. No subject line. No signature. No "Best," or "Thanks,"`
 
@@ -254,6 +258,7 @@ You write follow-up responses for outreach conversations.
 ${bannedPhrasesText}
 
 ${targetResult ? `## TARGET OUTCOME: ${targetResult}` : ''}
+${customInstructions ? `## CUSTOM INSTRUCTIONS: ${customInstructions}` : ''}
 
 OUTPUT: Response only. No signature.`
 
@@ -334,8 +339,10 @@ Write message:`
 
   try {
     if (useLocal) {
+      const ollamaHost = settings.localEndpoint || 'http://localhost:11434'
+      console.log(`🏠 Connecting to Ollama at ${ollamaHost} with model ${settings.localModel}`)
       try {
-        const ollama = new Ollama({ host: 'http://localhost:11434' })
+        const ollama = new Ollama({ host: ollamaHost })
         const response = await ollama.chat({
           model: settings.localModel,
           options: {
@@ -349,39 +356,23 @@ Write message:`
           ],
         })
         generatedMessage = response.message.content
-      } catch (error) {
-        console.log('Local failed, trying fallback model...')
-        try {
-          const ollama = new Ollama({ host: 'http://localhost:11434' })
-          const response = await ollama.chat({
-            model: 'llama3.1:8b',
-            options: {
-              temperature: settings.temperature,
-              top_p: settings.topP,
-              num_predict: settings.maxTokens
-            },
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-          })
-          generatedMessage = response.message.content
-        } catch (e) {
-          console.log('Ollama failed, using cloud...')
-          const completion = await groq.chat.completions.create({
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-            model: settings.cloudModel,
-            temperature: settings.temperature,
-            max_tokens: settings.maxTokens,
-            top_p: settings.topP,
-            frequency_penalty: settings.frequencyPenalty,
-            presence_penalty: settings.presencePenalty,
-          })
-          generatedMessage = completion.choices[0].message.content || ''
-        }
+        console.log('✅ Local model success')
+      } catch (error: any) {
+        console.log('❌ Local model failed:', error.message)
+        console.log('Falling back to cloud...')
+        const completion = await groq.chat.completions.create({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          model: settings.cloudModel,
+          temperature: settings.temperature,
+          max_tokens: settings.maxTokens,
+          top_p: settings.topP,
+          frequency_penalty: settings.frequencyPenalty,
+          presence_penalty: settings.presencePenalty,
+        })
+        generatedMessage = completion.choices[0].message.content || ''
       }
     } else {
       const completion = await groq.chat.completions.create({
