@@ -360,10 +360,17 @@ export default function SavedPage() {
 
   const goToGenerate = (c: Company, signal?: any) => {
     let context = c.last_context || ''
+    let sources = ''
     
-    // If signal provided, use it as context
+    // If signal provided, use its content as context
     if (signal) {
-      context = `${signal.label}: ${signal.detail}. ${signal.title || ''}`
+      const signalContent = signal.content || signal.quote || signal.detail || ''
+      context = `Recent news: ${signalContent}`
+      if (signal.publishedDate) context += ` (${signal.publishedDate})`
+      if (signal.url) {
+        context += `\n\nSource: ${signal.url}`
+        sources = signal.url
+      }
     }
     
     const params = new URLSearchParams({
@@ -372,20 +379,33 @@ export default function SavedPage() {
       prospectName: c.last_prospect_name || '',
       prospectTitle: c.last_prospect_title || '', 
       context: context, 
-      messageType: c.last_message_type || 'LinkedIn Connection'
+      messageType: signal ? (signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection') : (c.last_message_type || 'LinkedIn Connection')
     })
+    if (sources) params.set('sources', sources)
     router.push(`/?${params.toString()}`)
   }
 
   const goToGenerateWithSignal = (c: Company, signal: any) => {
-    const context = `${signal.label}: ${signal.detail}. Source: ${signal.title || signal.source}`
+    // Build context from signal content, not just the label
+    const signalContent = signal.content || signal.quote || signal.detail || ''
+    const signalUrl = signal.url || ''
+    const signalSource = signal.source || ''
+    const signalDate = signal.publishedDate || ''
+    
+    // Create rich context with the actual signal information
+    let context = `Recent news: ${signalContent}`
+    if (signalDate) context += ` (${signalDate})`
+    if (signalUrl) context += `\n\nSource: ${signalUrl}`
+    if (signalSource && !signalUrl) context += `\n\nSource: ${signalSource}`
+    
     const params = new URLSearchParams({
       company: c.company_name,
       industry: c.industry || '',
       prospectName: c.last_prospect_name || '',
       prospectTitle: c.last_prospect_title || '',
       context: context,
-      messageType: signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection'
+      messageType: signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection',
+      sources: signalUrl || ''
     })
     router.push(`/?${params.toString()}`)
   }
