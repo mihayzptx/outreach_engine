@@ -141,6 +141,8 @@ export default function HistoryPage() {
                             <div className="flex items-center gap-2">
                               <span className="text-white text-sm font-medium">{msg.prospect_name}</span>
                               <span className="text-zinc-500 text-xs">{msg.prospect_title}</span>
+                           
+                           
                             </div>
                             <div className="flex items-center gap-2">
                               {isManagerOrAdmin && msg.user_name && (
@@ -154,6 +156,7 @@ export default function HistoryPage() {
                             </div>
                           </div>
                           <p className="text-zinc-400 text-sm line-clamp-2">{msg.generated_message}</p>
+                          
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded">{msg.message_type}</span>
                             <span className="text-[10px] text-zinc-600">{formatDate(msg.created_at)}</span>
@@ -206,6 +209,7 @@ export default function HistoryPage() {
                 >
                   Copy Message
                 </button>
+                
               </div>
             </div>
           </div>
