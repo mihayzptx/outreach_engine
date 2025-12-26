@@ -3,6 +3,7 @@ import { Ollama } from 'ollama'
 import { NextResponse } from 'next/server'
 import { sql } from '@vercel/postgres'
 import { tavily } from '@tavily/core'
+import { buildOutreachContext, formatContextForPrompt, determineSeniority, getSeniorityGuidance } from '../../../lib/outreach-context'
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
     prospectName, 
     prospectTitle, 
     company, 
+    companyId,  // NEW: company ID for rich context
     industry, 
     context, 
     messageType, 
@@ -112,17 +114,36 @@ export async function POST(request: Request) {
     sources,
     useLocal,
     useWebResearch,
+    useRichContext,  // NEW: flag to use full context
     adjustment,
     userId,
     customInstructions,
     campaignId
   } = await request.json()
 
-  console.log(useLocal ? '🏠 LOCAL' : '☁️ CLOUD', useWebResearch ? '+ 🔍 RESEARCH' : '', campaignId ? `📋 Campaign: ${campaignId}` : '')
+  console.log(useLocal ? '🏠 LOCAL' : '☁️ CLOUD', useWebResearch ? '+ 🔍 RESEARCH' : '', useRichContext ? '+ 📊 RICH CONTEXT' : '', campaignId ? `📋 Campaign: ${campaignId}` : '')
 
   // Get settings from database
   const settings = await getSettings()
   console.log(`📊 Using model: ${useLocal ? settings.localModel : settings.cloudModel}, temp: ${settings.temperature}`)
+
+  // Build rich context if company ID provided and flag enabled
+  let richContext = ''
+  let outreachContext = null
+  
+  if (useRichContext && companyId) {
+    try {
+      outreachContext = await buildOutreachContext(companyId, prospectName, prospectTitle, settings)
+      richContext = formatContextForPrompt(outreachContext)
+      console.log(`📊 Rich context loaded: ICP ${outreachContext.icpFit.score}%, ${outreachContext.research.recentSignals.length} signals`)
+    } catch (e) {
+      console.error('Failed to build rich context:', e)
+    }
+  }
+
+  // Determine seniority for messaging adjustments
+  const seniority = determineSeniority(prospectTitle)
+  const seniorityGuidance = getSeniorityGuidance(seniority)
 
   const lengthInstructions: Record<string, string> = {
     short: '2-3 sentences MAXIMUM. Under 200 characters ideal.',
@@ -138,6 +159,10 @@ export async function POST(request: Request) {
     direct: 'Get to the point fast. No fluff. Blunt.',
     enthusiastic: 'High energy. Excited about their work.'
   }
+
+  // Auto-adjust based on seniority if not specified
+  const effectiveLength = messageLength || (seniority === 'C-level' ? 'short' : 'medium')
+  const effectiveTone = toneOfVoice || (seniority === 'C-level' ? 'warm' : 'friendly')
 
   // Web research
   let researchContext = ''
@@ -201,6 +226,11 @@ export async function POST(request: Request) {
   // Build services list
   const servicesText = settings.services.map((s: string) => `- ${s}`).join('\n')
 
+  // Build relevant services if we have rich context
+  const relevantServicesText = outreachContext?.icpFit.relevantServices.length 
+    ? `## MOST RELEVANT SERVICES FOR THIS PROSPECT:\n${outreachContext.icpFit.relevantServices.map((s: string) => `- ${s}`).join('\n')}\n\n`
+    : ''
+
   // Build system prompt using settings
   let systemPrompt = `${settings.systemPromptBase}
 
@@ -210,17 +240,22 @@ ${settings.companyDescription}
 ## SERVICES (know these but don't list them in messages):
 ${servicesText}
 
-## IDEAL CUSTOMER SIGNALS:
+${relevantServicesText}## IDEAL CUSTOMER SIGNALS:
 ${settings.idealCustomerSignals.map((s: string) => `- ${s}`).join('\n')}
 
+## SENIORITY-BASED APPROACH (THIS PROSPECT: ${seniority})
+${seniorityGuidance}
+
 ## CRITICAL RULES - FOLLOW EXACTLY:
-1. ${lengthInstructions[messageLength] || lengthInstructions.medium}
-2. ${toneInstructions[toneOfVoice] || toneInstructions.professional}
+1. ${lengthInstructions[effectiveLength] || lengthInstructions.medium}
+2. ${toneInstructions[effectiveTone] || toneInstructions.professional}
 3. Lead with THEIR specific situation, not who you are
-4. Reference ONE specific detail from their context
-5. End with soft CTA or question, never hard sell
-6. Position as peer/expert, not vendor begging for time
-7. NEVER start with "I"
+4. MUST include "${prospectName.split(' ')[0]}" (first name) in the greeting
+5. MUST reference "${company}" by name at least once in the message
+6. Reference at least ONE specific detail from their context
+7. End with soft CTA or question, never hard sell
+8. Position as peer/expert, not vendor begging for time
+9. NEVER start the message body with "I"
 
 ## BANNED PHRASES - NEVER USE:
 ${bannedPhrasesText}
@@ -229,15 +264,16 @@ ${bannedPhrasesText}
 ${goodOpenersText}
 
 ## STRUCTURE:
-1. Hook: Specific observation about them (1 sentence)
-2. Bridge: Why it matters to them (1 sentence)  
-3. CTA: Soft question or offer (1 sentence)
+1. Greeting: "${prospectName.split(' ')[0]}," (first name only)
+2. Hook: Specific observation about ${company} or their role (1 sentence)
+3. Bridge: Why it matters to them (1 sentence)  
+4. CTA: Soft question or offer (1 sentence)
 
 ${targetResult ? `## TARGET OUTCOME: ${targetResult}` : ''}
 ${sources ? `## REFERENCE SOURCES: ${sources}` : ''}
 ${customInstructions ? `## CUSTOM INSTRUCTIONS: ${customInstructions}` : ''}
 
-OUTPUT: Message body only. No subject line. No signature. No "Best," or "Thanks,"`
+OUTPUT: Message body only. No subject line. No signature. No "Best," or "Thanks,". Start with "${prospectName.split(' ')[0]},"`
 
   let userPrompt = ''
 
@@ -262,14 +298,16 @@ ${customInstructions ? `## CUSTOM INSTRUCTIONS: ${customInstructions}` : ''}
 
 OUTPUT: Response only. No signature.`
 
-    userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
-Industry: ${industry}
-Context: ${context}${researchContext}
+    userPrompt = `Write a follow-up response for:
 
-CONVERSATION:
+PROSPECT: ${prospectName} at ${company}
+INDUSTRY: ${industry}
+CONTEXT: ${context}${researchContext}
+
+CONVERSATION HISTORY:
 ${messageHistory}
 
-Write response:`
+Write your response:`
   } else if (messageType === 'ABM') {
     // ABM: Soft touch, recognition-focused messages
     // Build examples from settings
@@ -287,12 +325,14 @@ ${settings.companyDescription}
 ## CRITICAL ABM RULES:
 1. ${lengthInstructions[messageLength] || lengthInstructions.medium}
 2. Tone: Warm, genuine, personal. Like a thoughtful peer, not a salesperson.
-3. Lead with SPECIFIC recognition of their achievement or work
-4. Show you did real research. Reference exact details.
-5. NO sales pitch. NO CTA for meetings or demos.
-6. End with a warm closing. Holiday wishes, congratulations, or genuine well-wishes.
-7. NEVER start with "I"
-8. Short paragraphs. Conversational. Like a personal note.
+3. MUST start with "${prospectName.split(' ')[0]}," (first name only, no "Hi" or "Hey")
+4. MUST mention "${company}" by name at least once
+5. Lead with SPECIFIC recognition of their achievement or work
+6. Show you did real research. Reference exact details from their context.
+7. NO sales pitch. NO CTA for meetings or demos.
+8. End with a warm closing. Holiday wishes, congratulations, or genuine well-wishes.
+9. NEVER start sentences with "I" (except greeting line)
+10. Short paragraphs. Conversational. Like a personal note.
 
 ## BANNED PHRASES - NEVER USE:
 ${bannedPhrasesText}
@@ -306,8 +346,8 @@ ${bannedPhrasesText}
 - Any meeting request
 
 ## ABM MESSAGE STRUCTURE:
-1. Opening: First name only, no "Hi" or "Hey"
-2. Recognition: Specific achievement or work you noticed (1-2 sentences)
+1. Opening: "${prospectName.split(' ')[0]}," (first name only)
+2. Recognition: Specific achievement at ${company} you noticed (1-2 sentences)
 3. Insight: Show you understand WHY it matters (1-2 sentences)
 4. Personal Touch: Genuine observation or connection (1 sentence)
 5. Warm Close: Well-wishes, seasonal greeting, or simple acknowledgment (1 sentence)
@@ -317,25 +357,41 @@ ${abmExamplesText ? `## EXAMPLE TONE (study these carefully and match this style
 ${targetResult ? `## SOFT TOUCH GOAL: ${targetResult}` : ''}
 ${sources ? `## REFERENCE SOURCES: ${sources}` : ''}
 
-OUTPUT: Message body only. No subject line. No formal signature.`
+OUTPUT: Message body only. No subject line. No formal signature. Start with "${prospectName.split(' ')[0]},"`
 
-    userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
-Industry: ${industry}
-Achievement/Context: ${context}${researchContext}
+    userPrompt = `Write a warm ABM message for:
 
-Write a warm ABM message recognizing their work:`
+PROSPECT: ${prospectName} (use first name "${prospectName.split(' ')[0]}" in greeting)
+TITLE: ${prospectTitle}
+COMPANY: ${company} (MUST mention by name)
+INDUSTRY: ${industry}
+
+ACHIEVEMENT/CONTEXT TO RECOGNIZE:
+${context}
+${researchContext}
+
+Remember: Start with "${prospectName.split(' ')[0]}," and mention "${company}" in the message.`
   } else {
-    userPrompt = `Prospect: ${prospectName}, ${prospectTitle} at ${company}
-Industry: ${industry}
-Context: ${context}${researchContext}
-Type: ${messageType}
+    // Include rich context if available
+    const richContextSection = richContext ? `\n${richContext}\n` : ''
+    
+    userPrompt = `Write a ${messageType} message for:
 
-${adjustment ? `ADJUSTMENT: Make this ${adjustment}` : ''}
+PROSPECT: ${prospectName} (use first name "${prospectName.split(' ')[0]}" in greeting)
+TITLE: ${prospectTitle}
+COMPANY: ${company} (MUST mention by name)
+INDUSTRY: ${industry}
+${richContextSection}
+CONTEXT/REASON FOR OUTREACH:
+${context}
+${researchContext}
+${adjustment ? `\nADJUSTMENT REQUEST: ${adjustment}` : ''}
 
-Write message:`
+Remember: Start with "${prospectName.split(' ')[0]}," and mention "${company}" in the message.`
   }
 
   let generatedMessage = ''
+  let generationFailed = false
 
   try {
     if (useLocal) {
@@ -389,18 +445,82 @@ Write message:`
       })
       generatedMessage = completion.choices[0].message.content || ''
     }
-  } catch (error) {
-    console.error('Generation error:', error)
+  } catch (error: any) {
+    console.error('Generation error:', error.message || error)
     generatedMessage = 'Error generating message. Please try again.'
+    generationFailed = true
   }
 
-  // Clean up output
-  generatedMessage = generatedMessage
-    .replace(/^(Subject|Subject Line|RE|Re):.*\n?/gi, '')
-    .replace(/^(Hi|Hello|Hey|Dear)\s+\[?Name\]?,?\s*/gi, '')
-    .replace(/\n*(Best|Thanks|Regards|Cheers|Best regards|Kind regards),?\n*.*/gi, '')
-    .replace(/\[Your Name\]|\[Name\]|\[Signature\]/gi, '')
-    .trim()
+  // Clean up output (only if generation succeeded)
+  if (!generationFailed) {
+    generatedMessage = generatedMessage
+      .replace(/^(Subject|Subject Line|RE|Re):.*\n?/gi, '')
+      .replace(/^(Hi|Hello|Hey|Dear)\s+\[?Name\]?,?\s*/gi, '')
+      .replace(/\n*(Best|Thanks|Regards|Cheers|Best regards|Kind regards),?\n*.*/gi, '')
+      .replace(/\[Your Name\]|\[Name\]|\[Signature\]/gi, '')
+      .trim()
+  }
+
+  // Check for personalization - auto-retry once if missing (only if generation succeeded)
+  const prospectFirstName = prospectName.split(' ')[0].toLowerCase()
+  const companyLower = company.toLowerCase()
+  const hasProspectName = generatedMessage.toLowerCase().includes(prospectFirstName)
+  const hasCompanyName = generatedMessage.toLowerCase().includes(companyLower)
+  
+  if (!generationFailed && (!hasProspectName || !hasCompanyName)) {
+    console.log('⚠️ Missing personalization, retrying with stricter prompt...')
+    
+    const retryPrompt = `The previous message was rejected because it didn't include personalization.
+
+MANDATORY REQUIREMENTS:
+1. Start with "${prospectName.split(' ')[0]}," (the prospect's first name)
+2. Mention "${company}" by name in the message body
+3. Reference something specific from their context
+
+Original request:
+${userPrompt}
+
+Write a new message that MUST include "${prospectName.split(' ')[0]}" and "${company}":`
+
+    try {
+      if (useLocal) {
+        const ollamaHost = settings.localEndpoint || 'http://localhost:11434'
+        const ollama = new Ollama({ host: ollamaHost })
+        const response = await ollama.chat({
+          model: settings.localModel,
+          options: { temperature: 0.5, num_predict: settings.maxTokens },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: retryPrompt }
+          ],
+        })
+        generatedMessage = response.message.content
+      } else {
+        const completion = await groq.chat.completions.create({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: retryPrompt }
+          ],
+          model: settings.cloudModel,
+          temperature: 0.5,
+          max_tokens: settings.maxTokens,
+        })
+        generatedMessage = completion.choices[0].message.content || ''
+      }
+      
+      // Clean retry output
+      generatedMessage = generatedMessage
+        .replace(/^(Subject|Subject Line|RE|Re):.*\n?/gi, '')
+        .replace(/^(Hi|Hello|Hey|Dear)\s+\[?Name\]?,?\s*/gi, '')
+        .replace(/\n*(Best|Thanks|Regards|Cheers|Best regards|Kind regards),?\n*.*/gi, '')
+        .replace(/\[Your Name\]|\[Name\]|\[Signature\]/gi, '')
+        .trim()
+        
+      console.log('✅ Retry complete')
+    } catch (retryError) {
+      console.error('Retry failed:', retryError)
+    }
+  }
 
   // Quality scoring
   const charCount = generatedMessage.length
@@ -414,8 +534,10 @@ Write message:`
   )
   const hasBannedPhrases = bannedRegex.test(generatedMessage)
   
-  const hasSpecificReference = generatedMessage.toLowerCase().includes(company.toLowerCase()) || 
-                               generatedMessage.toLowerCase().includes(prospectName.split(' ')[0].toLowerCase())
+  // Check personalization - both name AND company should be present
+  const finalHasProspectName = generatedMessage.toLowerCase().includes(prospectName.split(' ')[0].toLowerCase())
+  const finalHasCompanyName = generatedMessage.toLowerCase().includes(company.toLowerCase())
+  const hasSpecificReference = finalHasProspectName && finalHasCompanyName
   const endsWithQuestion = generatedMessage.trim().endsWith('?')
   
   // ABM-specific checks
@@ -429,7 +551,8 @@ Write message:`
   if (charCount > 800) qualityScore -= 10 // Even ABM shouldn't be too long
   if (charCount < 50) qualityScore -= 20
   if (wordCount < 10) qualityScore -= 15
-  if (!hasSpecificReference) qualityScore -= 10
+  if (!finalHasProspectName) qualityScore -= 15
+  if (!finalHasCompanyName) qualityScore -= 15
   
   // ABM doesn't need a question, other types benefit from it
   if (!endsWithQuestion && messageType === 'LinkedIn Connection') qualityScore -= 5
@@ -444,7 +567,8 @@ Write message:`
   if (startsWithI) warnings.push('Starts with "I" - consider rewording')
   if (hasBannedPhrases) warnings.push('Contains generic/banned phrases')
   if (charCount > 300 && messageType === 'LinkedIn Connection') warnings.push('Over LinkedIn 300 char limit')
-  if (!hasSpecificReference) warnings.push('Missing specific reference to prospect/company')
+  if (!finalHasProspectName) warnings.push(`Missing prospect name "${prospectName.split(' ')[0]}"`)
+  if (!finalHasCompanyName) warnings.push(`Missing company name "${company}"`)
   if (!endsWithQuestion && !isABM) warnings.push('Consider ending with a question')
   if (isABM && !hasWarmClosing) warnings.push('ABM: Consider adding a warm closing')
 
@@ -476,6 +600,7 @@ Write message:`
       warnings
     },
     modelUsed: useLocal ? settings.localModel : settings.cloudModel,
-    temperature: settings.temperature
+    temperature: settings.temperature,
+    error: generationFailed ? 'Generation failed - check API keys' : undefined
   })
 }

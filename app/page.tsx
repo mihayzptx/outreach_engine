@@ -31,11 +31,27 @@ interface SavedCompany {
   last_prospect_title: string
   last_context: string
   last_message_type: string
+  icp_score?: number
+  icp_fit?: string
+  extracted_info?: any
+}
+
+interface ContextPreview {
+  icpScore: number
+  icpFit: string
+  seniority: string
+  isDecisionMaker: boolean
+  signalCount: number
+  painPointCount: number
+  relevantServices: string[]
+  hookSuggestions: string[]
+  recommendedTone: string
+  recommendedLength: string
 }
 
 function HomeContent() {
   const [formData, setFormData] = useState({
-    prospectName: '', prospectTitle: '', company: '', industry: '', industryOther: '',
+    prospectName: '', prospectTitle: '', company: '', companyId: null as number | null, industry: '', industryOther: '',
     context: '', messageType: 'LinkedIn Connection', messageHistory: '',
     messageLength: 'medium', toneOfVoice: 'professional', targetResult: '',
     targetResultOther: '', sources: '', customInstructions: ''
@@ -44,6 +60,9 @@ function HomeContent() {
   const [useLocal, setUseLocal] = useState(false)
   const [checkingModel, setCheckingModel] = useState(false)
   const [useWebResearch, setUseWebResearch] = useState(false)
+  const [useRichContext, setUseRichContext] = useState(true)  // NEW: rich context toggle
+  const [contextPreview, setContextPreview] = useState<ContextPreview | null>(null)  // NEW: context preview
+  const [loadingContext, setLoadingContext] = useState(false)
   const [saveCompany, setSaveCompany] = useState(false)
   const [message, setMessage] = useState('')
   const [displayedSources, setDisplayedSources] = useState<string[]>([])
@@ -151,10 +170,11 @@ function HomeContent() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  const selectSuggestion = (company: SavedCompany) => {
+  const selectSuggestion = async (company: SavedCompany) => {
     setFormData(prev => ({
       ...prev,
       company: company.company_name,
+      companyId: company.id,
       industry: company.industry || prev.industry,
       prospectName: company.last_prospect_name || '',
       prospectTitle: company.last_prospect_title || '',
@@ -162,6 +182,43 @@ function HomeContent() {
       messageType: company.last_message_type || 'LinkedIn Connection'
     }))
     setShowSuggestions(false)
+    
+    // Load context preview if rich context enabled
+    if (useRichContext) {
+      loadContextPreview(company.id, company.last_prospect_name || '', company.last_prospect_title || '')
+    }
+  }
+
+  const loadContextPreview = async (companyId: number, prospectName: string, prospectTitle: string) => {
+    if (!companyId) return
+    
+    setLoadingContext(true)
+    setContextPreview(null)
+    
+    try {
+      const res = await fetch('/api/outreach/context', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId, prospectName, prospectTitle })
+      })
+      const data = await res.json()
+      
+      if (data.success && data.summary) {
+        setContextPreview(data.summary)
+        
+        // Auto-apply recommended settings if not already set
+        if (data.summary.recommendedTone && formData.toneOfVoice === 'professional') {
+          setFormData(prev => ({ ...prev, toneOfVoice: data.summary.recommendedTone }))
+        }
+        if (data.summary.recommendedLength && formData.messageLength === 'medium') {
+          setFormData(prev => ({ ...prev, messageLength: data.summary.recommendedLength }))
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load context preview:', e)
+    }
+    
+    setLoadingContext(false)
   }
 
   const checkLocalModel = async () => {
@@ -207,6 +264,7 @@ function HomeContent() {
     setMetrics(null)
     
     if (useWebResearch) setLoadingStep('Researching company...')
+    else if (useRichContext && formData.companyId) setLoadingStep('Loading context...')
     else setLoadingStep('Generating message...')
     
     try {
@@ -217,7 +275,10 @@ function HomeContent() {
           ...formData,
           industry: getEffectiveIndustry(),
           targetResult: getEffectiveTargetResult(),
-          useLocal, useWebResearch, adjustment,
+          useLocal, 
+          useWebResearch, 
+          useRichContext: useRichContext && !!formData.companyId,
+          adjustment,
           campaignId: selectedCampaign
         })
       })
@@ -350,7 +411,7 @@ function HomeContent() {
 
   const clearForm = () => {
     setFormData({
-      prospectName: '', prospectTitle: '', company: '', industry: '', industryOther: '',
+      prospectName: '', prospectTitle: '', company: '', companyId: null, industry: '', industryOther: '',
       context: '', messageType: 'LinkedIn Connection', messageHistory: '',
       messageLength: 'medium', toneOfVoice: 'professional', targetResult: '',
       targetResultOther: '', sources: '', customInstructions: ''
@@ -359,6 +420,7 @@ function HomeContent() {
     setMetrics(null)
     setDisplayedSources([])
     setSelectedCampaign(null)
+    setContextPreview(null)
   }
 
   const currentTargetResults = formData.messageType === 'ABM' ? ABM_TARGET_RESULTS : TARGET_RESULTS
@@ -650,6 +712,10 @@ function HomeContent() {
 
               {/* Toggles */}
               <div className="flex flex-wrap gap-2">
+                <label className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer border transition-colors ${useRichContext ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-zinc-900 border-zinc-800 text-zinc-400'}`}>
+                  <input type="checkbox" checked={useRichContext} onChange={(e) => setUseRichContext(e.target.checked)} className="sr-only" />
+                  <span className="text-sm">📊 Rich Context</span>
+                </label>
                 <label className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer border transition-colors ${useWebResearch ? 'bg-yellow-400/10 border-yellow-400/30 text-yellow-400' : 'bg-zinc-900 border-zinc-800 text-zinc-400'}`}>
                   <input type="checkbox" checked={useWebResearch} onChange={(e) => setUseWebResearch(e.target.checked)} className="sr-only" />
                   <span className="text-sm">🔍 Web Research</span>
@@ -663,6 +729,76 @@ function HomeContent() {
                   <span className="text-sm">{checkingModel ? '⏳' : '🖥️'} Local Model</span>
                 </label>
               </div>
+
+              {/* Context Preview Panel */}
+              {useRichContext && formData.companyId && (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Context Preview</h3>
+                    {loadingContext && <span className="text-xs text-zinc-500">Loading...</span>}
+                  </div>
+                  
+                  {contextPreview ? (
+                    <div className="space-y-3">
+                      {/* ICP Score */}
+                      <div className="flex items-center gap-3">
+                        <div className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                          contextPreview.icpFit === 'high' ? 'bg-emerald-500/20 text-emerald-400' :
+                          contextPreview.icpFit === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                          'bg-zinc-700 text-zinc-400'
+                        }`}>
+                          ICP: {contextPreview.icpScore}%
+                        </div>
+                        <span className="text-xs text-zinc-500">
+                          {contextPreview.seniority} • {contextPreview.isDecisionMaker ? 'Decision Maker' : 'Influencer'}
+                        </span>
+                      </div>
+                      
+                      {/* Signals & Pain Points */}
+                      <div className="flex gap-4 text-xs">
+                        <span className="text-zinc-500">{contextPreview.signalCount} signals</span>
+                        <span className="text-zinc-500">{contextPreview.painPointCount} pain points</span>
+                      </div>
+                      
+                      {/* Relevant Services */}
+                      {contextPreview.relevantServices.length > 0 && (
+                        <div>
+                          <p className="text-[10px] text-zinc-600 mb-1">Relevant Services:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {contextPreview.relevantServices.map((s, i) => (
+                              <span key={i} className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-[10px] rounded">{s}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Hook Suggestions */}
+                      {contextPreview.hookSuggestions.length > 0 && (
+                        <div>
+                          <p className="text-[10px] text-zinc-600 mb-1">Hook Ideas:</p>
+                          <div className="space-y-1">
+                            {contextPreview.hookSuggestions.slice(0, 2).map((hook, i) => (
+                              <p key={i} className="text-xs text-zinc-400 italic">&quot;{hook}&quot;</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Recommendations */}
+                      <div className="flex gap-2 pt-2 border-t border-zinc-800">
+                        <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] rounded">
+                          Tone: {contextPreview.recommendedTone}
+                        </span>
+                        <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] rounded">
+                          Length: {contextPreview.recommendedLength}
+                        </span>
+                      </div>
+                    </div>
+                  ) : !loadingContext && (
+                    <p className="text-xs text-zinc-600">Select a saved company to see context</p>
+                  )}
+                </div>
+              )}
 
               {/* Generate Button */}
               <button

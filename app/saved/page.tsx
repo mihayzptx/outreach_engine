@@ -60,8 +60,13 @@ interface Company {
   signal_count?: number
   is_archived?: boolean
   archived_at?: string
+  icp_score?: number
+  icp_fit?: 'high' | 'medium' | 'low'
+  icp_breakdown?: any
+  icp_scored_at?: string
   extracted_info?: {
     description?: string
+    industry?: string
     founded?: string
     headquarters?: string
     employeeCount?: string
@@ -101,10 +106,139 @@ export default function SavedPage() {
   const [researchProgress, setResearchProgress] = useState({ current: 0, total: 0 })
   const [showArchived, setShowArchived] = useState(false)
   const [signalDebug, setSignalDebug] = useState<any>(null)
+  const [icpSettings, setIcpSettings] = useState<any>(null)
+  const [filterICP, setFilterICP] = useState('')
+  const [scoringAll, setScoringAll] = useState(false)
+  
+  // Multi-select for bulk actions
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkActionRunning, setBulkActionRunning] = useState(false)
+  
+  // Add/Edit Company Modal
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null)
+  const [companyForm, setCompanyForm] = useState({
+    company_name: '',
+    industry: '',
+    country: '',
+    website: '',
+    employee_count: '',
+    revenue_range: '',
+    funding_stage: '',
+    funding_amount: '',
+    founded_year: '',
+    last_prospect_name: '',
+    last_prospect_title: '',
+    notes: ''
+  })
+  const [formError, setFormError] = useState('')
+  const [saving, setSaving] = useState(false)
+  
   const router = useRouter()
 
-  useEffect(() => { fetchCompanies() }, [])
-  useEffect(() => { applyFilters() }, [companies, searchQuery, filterGrade, sortBy, showArchived])
+  useEffect(() => { 
+    fetchCompanies() 
+    loadICPSettings()
+  }, [])
+  useEffect(() => { applyFilters() }, [companies, searchQuery, filterGrade, filterICP, sortBy, showArchived])
+
+  const loadICPSettings = () => {
+    try {
+      const stored = localStorage.getItem('llm-settings')
+      if (stored) {
+        const settings = JSON.parse(stored)
+        if (settings.icp) {
+          setIcpSettings(settings.icp)
+        }
+      }
+    } catch {}
+  }
+
+  const calculateICPScore = (company: Company): { score: number; fit: 'high' | 'medium' | 'low' } => {
+    if (!icpSettings) return { score: 0, fit: 'low' }
+    
+    let score = 0
+    let maxScore = 0
+    
+    // Industry match
+    const industryMax = Math.max(...(icpSettings.industries?.filter((i: any) => i.enabled).map((i: any) => i.weight) || [0]), 0)
+    maxScore += industryMax
+    const companyIndustry = (company.industry || company.extracted_info?.industry || '').toLowerCase()
+    for (const ind of (icpSettings.industries || []).filter((i: any) => i.enabled)) {
+      if (companyIndustry.includes(ind.name.toLowerCase())) {
+        score += ind.weight
+        break
+      }
+    }
+    
+    // Company size match
+    const sizeMax = Math.max(...(icpSettings.companySizes?.filter((s: any) => s.enabled).map((s: any) => s.weight) || [0]), 0)
+    maxScore += sizeMax
+    const empStr = company.employee_count || company.extracted_info?.employeeCount || ''
+    const empMatch = empStr.match(/(\d+)/g)
+    if (empMatch) {
+      const empCount = parseInt(empMatch[0])
+      for (const size of (icpSettings.companySizes || []).filter((s: any) => s.enabled)) {
+        if (empCount >= size.min && empCount <= size.max) {
+          score += size.weight
+          break
+        }
+      }
+    }
+    
+    // Funding stage match
+    const fundingMax = Math.max(...(icpSettings.fundingStages?.filter((f: any) => f.enabled).map((f: any) => f.weight) || [0]), 0)
+    maxScore += fundingMax
+    const funding = (company.funding_stage || company.extracted_info?.lastRound || '').toLowerCase()
+    for (const stage of (icpSettings.fundingStages || []).filter((f: any) => f.enabled)) {
+      if (funding.includes(stage.name.toLowerCase())) {
+        score += stage.weight
+        break
+      }
+    }
+    
+    // Geography match
+    const geoMax = Math.max(...(icpSettings.geographies?.filter((g: any) => g.enabled).map((g: any) => g.weight) || [0]), 0)
+    maxScore += geoMax
+    const location = (company.country || company.extracted_info?.headquarters || '').toLowerCase()
+    for (const geo of (icpSettings.geographies || []).filter((g: any) => g.enabled)) {
+      if (location.includes(geo.name.toLowerCase())) {
+        score += geo.weight
+        break
+      }
+    }
+    
+    // Buying signals
+    const signalsMax = (icpSettings.buyingSignals || []).filter((s: any) => s.enabled).reduce((sum: number, s: any) => sum + s.points, 0)
+    maxScore += signalsMax
+    const signals = getSignals(company)
+    const signalText = signals.map((s: any) => (s.detail || s.content || s.label || '').toLowerCase()).join(' ')
+    for (const signal of (icpSettings.buyingSignals || []).filter((s: any) => s.enabled)) {
+      const words = signal.name.toLowerCase().split(' ')
+      if (words.some((w: string) => signalText.includes(w))) {
+        score += signal.points
+      }
+    }
+    
+    // Tech stack
+    const techMax = (icpSettings.techStack || []).filter((t: any) => t.enabled).reduce((sum: number, t: any) => sum + t.weight, 0)
+    maxScore += techMax
+    const techStack = (company.extracted_info?.techStack || []).map((t: string) => t.toLowerCase()).join(' ')
+    for (const tech of (icpSettings.techStack || []).filter((t: any) => t.enabled)) {
+      if (techStack.includes(tech.name.toLowerCase())) {
+        score += tech.weight
+      }
+    }
+    
+    // Normalize to 0-100
+    const normalizedScore = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
+    
+    let fit: 'high' | 'medium' | 'low' = 'low'
+    if (normalizedScore >= 70) fit = 'high'
+    else if (normalizedScore >= 40) fit = 'medium'
+    
+    return { score: normalizedScore, fit }
+  }
 
   const fetchCompanies = async () => {
     try {
@@ -131,6 +265,14 @@ export default function SavedPage() {
     }
     if (filterGrade) result = result.filter(c => c.lead_grade === filterGrade)
     
+    // ICP filter
+    if (filterICP && icpSettings) {
+      result = result.filter(c => {
+        const { fit } = calculateICPScore(c)
+        return fit === filterICP
+      })
+    }
+    
     result.sort((a, b) => {
       switch (sortBy) {
         case 'grade_desc':
@@ -139,6 +281,11 @@ export default function SavedPage() {
         case 'signals_desc': return (b.signal_count || 0) - (a.signal_count || 0)
         case 'name_asc': return a.company_name.localeCompare(b.company_name)
         case 'recent': return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        case 'icp_desc':
+          if (!icpSettings) return 0
+          const scoreA = calculateICPScore(a).score
+          const scoreB = calculateICPScore(b).score
+          return scoreB - scoreA
         default: return 0
       }
     })
@@ -219,10 +366,255 @@ export default function SavedPage() {
   }
 
   const deleteCompany = async (id: number) => {
-    if (!confirm('Delete this company?')) return
+    if (!confirm('Delete this company? This cannot be undone.')) return
     await fetch(`/api/companies?id=${id}`, { method: 'DELETE' })
     setSelected(null)
     fetchCompanies()
+  }
+
+  const openAddModal = () => {
+    setEditingCompany(null)
+    setCompanyForm({
+      company_name: '',
+      industry: '',
+      country: '',
+      website: '',
+      employee_count: '',
+      revenue_range: '',
+      funding_stage: '',
+      funding_amount: '',
+      founded_year: '',
+      last_prospect_name: '',
+      last_prospect_title: '',
+      notes: ''
+    })
+    setFormError('')
+    setShowAddModal(true)
+  }
+
+  const openEditModal = (company: Company) => {
+    setEditingCompany(company)
+    setCompanyForm({
+      company_name: company.company_name || '',
+      industry: company.industry || '',
+      country: company.country || '',
+      website: company.website || '',
+      employee_count: company.employee_count || '',
+      revenue_range: company.revenue_range || '',
+      funding_stage: company.funding_stage || '',
+      funding_amount: company.funding_amount || '',
+      founded_year: company.founded_year?.toString() || '',
+      last_prospect_name: company.last_prospect_name || '',
+      last_prospect_title: company.last_prospect_title || '',
+      notes: company.notes || ''
+    })
+    setFormError('')
+    setShowAddModal(true)
+  }
+
+  const saveCompany = async () => {
+    if (!companyForm.company_name.trim()) {
+      setFormError('Company name is required')
+      return
+    }
+
+    setSaving(true)
+    setFormError('')
+
+    try {
+      if (editingCompany) {
+        // Update existing
+        const res = await fetch('/api/companies/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editingCompany.id,
+            ...companyForm,
+            founded_year: companyForm.founded_year ? parseInt(companyForm.founded_year) : null
+          })
+        })
+        const data = await res.json()
+        if (!data.success) throw new Error(data.error || 'Failed to update')
+        
+        // Update selected if it's the same company
+        if (selected?.id === editingCompany.id && data.company) {
+          setSelected(data.company)
+        }
+      } else {
+        // Create new
+        const res = await fetch('/api/companies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...companyForm,
+            founded_year: companyForm.founded_year ? parseInt(companyForm.founded_year) : null
+          })
+        })
+        const data = await res.json()
+        
+        if (res.status === 409) {
+          setFormError('Company already exists')
+          setSaving(false)
+          return
+        }
+        
+        if (!res.ok) throw new Error(data.error || 'Failed to create')
+      }
+
+      setShowAddModal(false)
+      fetchCompanies()
+    } catch (e: any) {
+      setFormError(e.message || 'Failed to save')
+    }
+    
+    setSaving(false)
+  }
+
+  // Multi-select helpers
+  const toggleSelect = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const newSet = new Set(selectedIds)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    setSelectedIds(newSet)
+  }
+
+  const selectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filtered.map(c => c.id)))
+    }
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+  }
+
+  // Bulk actions
+  const bulkArchive = async () => {
+    if (!confirm(`Archive ${selectedIds.size} companies?`)) return
+    setBulkActionRunning(true)
+    
+    for (const id of selectedIds) {
+      await updateCompany(id, { is_archived: true, archived_at: new Date().toISOString() })
+    }
+    
+    clearSelection()
+    fetchCompanies()
+    setBulkActionRunning(false)
+  }
+
+  const bulkUnarchive = async () => {
+    if (!confirm(`Unarchive ${selectedIds.size} companies?`)) return
+    setBulkActionRunning(true)
+    
+    for (const id of selectedIds) {
+      await updateCompany(id, { is_archived: false, archived_at: null })
+    }
+    
+    clearSelection()
+    fetchCompanies()
+    setBulkActionRunning(false)
+  }
+
+  const bulkDelete = async () => {
+    if (!confirm(`Permanently delete ${selectedIds.size} companies? This cannot be undone.`)) return
+    setBulkActionRunning(true)
+    
+    for (const id of selectedIds) {
+      await fetch(`/api/companies?id=${id}`, { method: 'DELETE' })
+    }
+    
+    clearSelection()
+    fetchCompanies()
+    setBulkActionRunning(false)
+  }
+
+  const bulkResearch = async () => {
+    const toResearch = filtered.filter(c => selectedIds.has(c.id))
+    if (toResearch.length === 0) return
+    
+    setBulkActionRunning(true)
+    await runResearchBatch(toResearch)
+    clearSelection()
+    setBulkActionRunning(false)
+  }
+
+  const bulkScore = async () => {
+    if (!icpSettings) return
+    
+    const toScore = filtered.filter(c => selectedIds.has(c.id))
+    if (toScore.length === 0) return
+    
+    setBulkActionRunning(true)
+    
+    try {
+      const res = await fetch('/api/icp/score', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyIds: toScore.map(c => c.id),
+          icpSettings
+        })
+      })
+      const data = await res.json()
+      if (data.success) {
+        fetchCompanies()
+      }
+    } catch (e) {
+      console.error('Bulk score failed:', e)
+    }
+    
+    clearSelection()
+    setBulkActionRunning(false)
+  }
+
+  const bulkAddLabel = async (label: string) => {
+    setBulkActionRunning(true)
+    
+    for (const id of selectedIds) {
+      const company = companies.find(c => c.id === id)
+      if (company) {
+        const currentLabels = company.labels || []
+        if (!currentLabels.includes(label)) {
+          await updateCompany(id, { labels: [...currentLabels, label] })
+        }
+      }
+    }
+    
+    clearSelection()
+    fetchCompanies()
+    setBulkActionRunning(false)
+  }
+
+  const bulkExport = () => {
+    const toExport = filtered.filter(c => selectedIds.has(c.id))
+    const csv = [
+      ['Company', 'Industry', 'Country', 'Contact', 'Title', 'Website', 'Funding', 'Grade', 'ICP Score'].join(','),
+      ...toExport.map(c => [
+        `"${c.company_name}"`,
+        `"${c.industry || ''}"`,
+        `"${c.country || ''}"`,
+        `"${c.last_prospect_name || ''}"`,
+        `"${c.last_prospect_title || ''}"`,
+        `"${c.website || ''}"`,
+        `"${c.funding_stage || ''}"`,
+        c.lead_grade || '',
+        c.icp_score || ''
+      ].join(','))
+    ].join('\n')
+    
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `companies-export-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const archiveCompany = async (id: number) => {
@@ -294,6 +686,48 @@ export default function SavedPage() {
     setResearchingAll(false)
   }
 
+  const rescoreAllCompanies = async () => {
+    if (!icpSettings) return
+    
+    const toScore = companies.filter(c => !c.is_archived)
+    if (toScore.length === 0) return
+    
+    setScoringAll(true)
+    
+    try {
+      // Batch score all companies
+      const res = await fetch('/api/icp/score', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companies: toScore.map(c => ({
+            id: c.id,
+            company_name: c.company_name,
+            industry: c.industry,
+            employee_count: c.employee_count,
+            funding_stage: c.funding_stage,
+            country: c.country,
+            signals: getSignals(c).map((s: any) => s.detail || s.category || ''),
+            extracted_info: c.extracted_info
+          })),
+          icpSettings,
+          saveToDb: true
+        })
+      })
+      
+      const data = await res.json()
+      console.log('ICP Scoring complete:', data)
+      
+      // Refresh companies to get updated scores
+      await fetchCompanies()
+      
+    } catch (e) {
+      console.error('ICP scoring failed:', e)
+    }
+    
+    setScoringAll(false)
+  }
+
   const updateCompany = async (id: number, updates: any) => {
     await fetch('/api/companies/update', {
       method: 'POST',
@@ -360,10 +794,17 @@ export default function SavedPage() {
 
   const goToGenerate = (c: Company, signal?: any) => {
     let context = c.last_context || ''
+    let sources = ''
     
-    // If signal provided, use it as context
+    // If signal provided, use its content as context
     if (signal) {
-      context = `${signal.label}: ${signal.detail}. ${signal.title || ''}`
+      const signalContent = signal.content || signal.quote || signal.detail || ''
+      context = `Recent news: ${signalContent}`
+      if (signal.publishedDate) context += ` (${signal.publishedDate})`
+      if (signal.url) {
+        context += `\n\nSource: ${signal.url}`
+        sources = signal.url
+      }
     }
     
     const params = new URLSearchParams({
@@ -372,20 +813,33 @@ export default function SavedPage() {
       prospectName: c.last_prospect_name || '',
       prospectTitle: c.last_prospect_title || '', 
       context: context, 
-      messageType: c.last_message_type || 'LinkedIn Connection'
+      messageType: signal ? (signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection') : (c.last_message_type || 'LinkedIn Connection')
     })
+    if (sources) params.set('sources', sources)
     router.push(`/?${params.toString()}`)
   }
 
   const goToGenerateWithSignal = (c: Company, signal: any) => {
-    const context = `${signal.label}: ${signal.detail}. Source: ${signal.title || signal.source}`
+    // Build context from signal content, not just the label
+    const signalContent = signal.content || signal.quote || signal.detail || ''
+    const signalUrl = signal.url || ''
+    const signalSource = signal.source || ''
+    const signalDate = signal.publishedDate || ''
+    
+    // Create rich context with the actual signal information
+    let context = `Recent news: ${signalContent}`
+    if (signalDate) context += ` (${signalDate})`
+    if (signalUrl) context += `\n\nSource: ${signalUrl}`
+    if (signalSource && !signalUrl) context += `\n\nSource: ${signalSource}`
+    
     const params = new URLSearchParams({
       company: c.company_name,
       industry: c.industry || '',
       prospectName: c.last_prospect_name || '',
       prospectTitle: c.last_prospect_title || '',
       context: context,
-      messageType: signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection'
+      messageType: signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection',
+      sources: signalUrl || ''
     })
     router.push(`/?${params.toString()}`)
   }
@@ -494,12 +948,12 @@ export default function SavedPage() {
                   {/* Info Grid */}
                   <div className="grid grid-cols-4 gap-2">
                     {[
-                      { label: 'Employees', value: selected.employee_count },
+                      { label: 'Employees', value: selected.employee_count || selected.extracted_info?.employeeCount },
                       { label: 'Revenue', value: selected.revenue_range },
-                      { label: 'Funding', value: selected.funding_stage },
-                      { label: 'Amount', value: selected.funding_amount },
-                      { label: 'Founded', value: selected.founded_year },
-                      { label: 'Location', value: selected.country },
+                      { label: 'Funding', value: selected.funding_stage || selected.extracted_info?.lastRound },
+                      { label: 'Amount', value: selected.funding_amount || selected.extracted_info?.lastRoundAmount },
+                      { label: 'Founded', value: selected.founded_year || selected.extracted_info?.founded },
+                      { label: 'Location', value: selected.country || selected.extracted_info?.headquarters },
                       { label: 'Hiring', value: selected.is_hiring ? 'Yes' : 'No', highlight: selected.is_hiring },
                       { label: 'Intent', value: selected.buyer_intent ? 'Yes' : 'No', highlight: selected.buyer_intent }
                     ].map((item, i) => (
@@ -509,6 +963,60 @@ export default function SavedPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Description from extracted_info */}
+                  {selected.extracted_info?.description && (
+                    <div className="bg-zinc-950 rounded-lg p-3">
+                      <p className="text-[10px] text-zinc-500 uppercase mb-2">About</p>
+                      <p className="text-zinc-300 text-sm">{selected.extracted_info.description}</p>
+                    </div>
+                  )}
+
+                  {/* Pain Points & Outreach Angles from extracted_info */}
+                  {((selected.extracted_info?.painPoints && selected.extracted_info.painPoints.length > 0) || (selected.extracted_info?.outreachAngles && selected.extracted_info.outreachAngles.length > 0)) && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {selected.extracted_info?.painPoints && selected.extracted_info.painPoints.length > 0 && (
+                        <div className="bg-zinc-950 rounded-lg p-3">
+                          <p className="text-[10px] text-zinc-500 uppercase mb-2">💢 Pain Points</p>
+                          <div className="flex flex-wrap gap-1">
+                            {selected.extracted_info.painPoints.map((p: string, i: number) => (
+                              <span key={i} className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">{p}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {selected.extracted_info?.outreachAngles && selected.extracted_info.outreachAngles.length > 0 && (
+                        <div className="bg-zinc-950 rounded-lg p-3">
+                          <p className="text-[10px] text-zinc-500 uppercase mb-2">💡 Outreach Angles</p>
+                          <div className="space-y-1">
+                            {selected.extracted_info.outreachAngles.slice(0, 3).map((a: string, i: number) => (
+                              <p key={i} className="text-xs text-yellow-400 border-l-2 border-yellow-400 pl-2">{a}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Key People from extracted_info */}
+                  {selected.extracted_info?.keyPeople && selected.extracted_info.keyPeople.length > 0 && (
+                    <div className="bg-zinc-950 rounded-lg p-3">
+                      <p className="text-[10px] text-zinc-500 uppercase mb-2">👥 Key People</p>
+                      <div className="space-y-2">
+                        {selected.extracted_info.keyPeople.slice(0, 3).map((person: { name?: string; title?: string }, i: number) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 text-xs font-bold">
+                              {person.name?.charAt(0) || '?'}
+                            </div>
+                            <div>
+                              <p className="text-white text-sm">{person.name}</p>
+                              <p className="text-zinc-500 text-xs">{person.title}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Contact */}
                   <div className="bg-zinc-950 rounded-lg p-3">
@@ -742,6 +1250,9 @@ export default function SavedPage() {
 
             {/* Modal Footer */}
             <div className="p-4 border-t border-zinc-800 flex gap-2">
+              <button onClick={() => openEditModal(selected)} className="px-4 py-2 bg-zinc-800 text-zinc-400 rounded-lg text-sm hover:bg-zinc-700">
+                ✏️ Edit
+              </button>
               <button onClick={() => refreshCompany(selected.id, selected.company_name, selected.industry)} disabled={refreshing === selected.id} className="px-4 py-2 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg text-sm hover:bg-purple-500/30 disabled:opacity-50">
                 {refreshing === selected.id ? '⏳ Researching...' : '🔬 Deep Research'}
               </button>
@@ -816,6 +1327,12 @@ export default function SavedPage() {
             </div>
             <div className="flex items-center gap-2">
               <button
+                onClick={openAddModal}
+                className="px-3 py-1.5 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold hover:bg-yellow-300"
+              >
+                + Add Company
+              </button>
+              <button
                 onClick={() => setShowArchived(!showArchived)}
                 className={`px-3 py-1.5 rounded-lg text-sm ${showArchived ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
               >
@@ -830,12 +1347,30 @@ export default function SavedPage() {
                   {researchingAll ? `🔄 ${researchProgress.current}/${researchProgress.total}` : '🔍 Research All'}
                 </button>
               )}
+              {companies.length > 0 && !showArchived && icpSettings && (
+                <button 
+                  onClick={rescoreAllCompanies} 
+                  disabled={scoringAll}
+                  className="px-3 py-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-sm hover:bg-emerald-500/30 disabled:opacity-50"
+                >
+                  {scoringAll ? '🔄 Scoring...' : '🎯 Re-score ICP'}
+                </button>
+              )}
               <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
                 <option value="">All Grades</option>
                 {['A','B','C','D','E'].map(g => <option key={g} value={g}>Grade {g}</option>)}
               </select>
+              {icpSettings && (
+                <select value={filterICP} onChange={e => setFilterICP(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
+                  <option value="">All ICP</option>
+                  <option value="high">🟢 High Fit</option>
+                  <option value="medium">🟡 Medium Fit</option>
+                  <option value="low">🔴 Low Fit</option>
+                </select>
+              )}
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
                 <option value="grade_desc">Best Grade</option>
+                <option value="icp_desc">Best ICP Fit</option>
                 <option value="signals_desc">Most Signals</option>
                 <option value="name_asc">A-Z</option>
                 <option value="recent">Recent</option>
@@ -849,6 +1384,101 @@ export default function SavedPage() {
             onChange={e => setSearchQuery(e.target.value)}
             className="mt-3 w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm placeholder-zinc-600 focus:border-yellow-400"
           />
+          
+          {/* Bulk Action Bar */}
+          {selectedIds.size > 0 && (
+            <div className="mt-3 p-3 bg-yellow-400/10 border border-yellow-400/30 rounded-lg flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === filtered.length}
+                  onChange={selectAll}
+                  className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-yellow-400 focus:ring-yellow-400"
+                />
+                <span className="text-yellow-400 text-sm font-medium">{selectedIds.size} selected</span>
+              </div>
+              
+              <div className="h-4 w-px bg-yellow-400/30"></div>
+              
+              <div className="flex items-center gap-2 flex-wrap">
+                {!showArchived ? (
+                  <button
+                    onClick={bulkArchive}
+                    disabled={bulkActionRunning}
+                    className="px-3 py-1 bg-zinc-800 text-zinc-300 rounded text-xs hover:bg-zinc-700 disabled:opacity-50"
+                  >
+                    📁 Archive
+                  </button>
+                ) : (
+                  <button
+                    onClick={bulkUnarchive}
+                    disabled={bulkActionRunning}
+                    className="px-3 py-1 bg-amber-500/20 text-amber-400 rounded text-xs hover:bg-amber-500/30 disabled:opacity-50"
+                  >
+                    📤 Unarchive
+                  </button>
+                )}
+                
+                <button
+                  onClick={bulkResearch}
+                  disabled={bulkActionRunning}
+                  className="px-3 py-1 bg-blue-500/20 text-blue-400 rounded text-xs hover:bg-blue-500/30 disabled:opacity-50"
+                >
+                  🔬 Research
+                </button>
+                
+                {icpSettings && (
+                  <button
+                    onClick={bulkScore}
+                    disabled={bulkActionRunning}
+                    className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs hover:bg-emerald-500/30 disabled:opacity-50"
+                  >
+                    🎯 Score ICP
+                  </button>
+                )}
+                
+                <div className="relative group">
+                  <button className="px-3 py-1 bg-purple-500/20 text-purple-400 rounded text-xs hover:bg-purple-500/30">
+                    🏷️ Add Label ▾
+                  </button>
+                  <div className="absolute top-full left-0 mt-1 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl hidden group-hover:block z-20 min-w-[120px]">
+                    {PREDEFINED_LABELS.map(label => (
+                      <button
+                        key={label}
+                        onClick={() => bulkAddLabel(label)}
+                        className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800 flex items-center gap-2"
+                      >
+                        <span className={`w-2 h-2 rounded-full ${LABEL_COLORS[label]}`}></span>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <button
+                  onClick={bulkExport}
+                  className="px-3 py-1 bg-zinc-800 text-zinc-300 rounded text-xs hover:bg-zinc-700"
+                >
+                  📥 Export CSV
+                </button>
+                
+                <button
+                  onClick={bulkDelete}
+                  disabled={bulkActionRunning}
+                  className="px-3 py-1 bg-red-500/20 text-red-400 rounded text-xs hover:bg-red-500/30 disabled:opacity-50"
+                >
+                  🗑️ Delete
+                </button>
+              </div>
+              
+              <button
+                onClick={clearSelection}
+                className="ml-auto text-yellow-400/70 hover:text-yellow-400 text-xs"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </header>
 
         <div className="p-4 lg:p-6">
@@ -863,14 +1493,46 @@ export default function SavedPage() {
               <p className="text-zinc-500 text-sm mt-1">Save companies from the Generate page</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <>
+              {/* Select All Row */}
+              {filtered.length > 0 && (
+                <div className="flex items-center gap-2 mb-3 px-1">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.size === filtered.length && filtered.length > 0}
+                    onChange={selectAll}
+                    className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-yellow-400 focus:ring-yellow-400"
+                  />
+                  <span className="text-xs text-zinc-500">
+                    {selectedIds.size === filtered.length ? 'Deselect all' : 'Select all'} ({filtered.length})
+                  </span>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {filtered.map(c => (
                 <div
                   key={c.id}
                   onClick={() => openCompany(c)}
-                  className={`bg-zinc-900 border rounded-xl p-4 cursor-pointer hover:border-zinc-700 transition-all ${c.has_new_signals ? 'border-emerald-500/50' : 'border-zinc-800'}`}
+                  className={`bg-zinc-900 border rounded-xl p-4 cursor-pointer hover:border-zinc-700 transition-all relative ${
+                    selectedIds.has(c.id) ? 'border-yellow-400/50 bg-yellow-400/5' : 
+                    c.has_new_signals ? 'border-emerald-500/50' : 'border-zinc-800'
+                  }`}
                 >
-                  <div className="flex items-start gap-3 mb-3">
+                  {/* Checkbox */}
+                  <div 
+                    className="absolute top-3 left-3 z-10"
+                    onClick={(e) => toggleSelect(c.id, e)}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(c.id)}
+                      onChange={() => {}}
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-yellow-400 focus:ring-yellow-400 cursor-pointer"
+                    />
+                  </div>
+                  
+                  <div className="flex items-start gap-3 mb-3 pl-6">
                     {c.lead_grade ? (
                       <div className={`w-10 h-10 rounded-lg ${GRADE_COLORS[c.lead_grade]} flex items-center justify-center font-bold text-lg flex-shrink-0`}>
                         {c.lead_grade}
@@ -885,6 +1547,22 @@ export default function SavedPage() {
                       </div>
                       <p className="text-zinc-500 text-sm truncate">{c.last_prospect_name}</p>
                     </div>
+                    {/* ICP Score Badge */}
+                    {(c.icp_score !== undefined || icpSettings) && (() => {
+                      // Prefer database score, fall back to calculated
+                      const score = c.icp_score ?? (icpSettings ? calculateICPScore(c).score : 0)
+                      const fit = c.icp_fit ?? (score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low')
+                      const fitColors = {
+                        high: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+                        medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+                        low: 'bg-zinc-700/50 text-zinc-400 border-zinc-600'
+                      }
+                      return (
+                        <div className={`px-2 py-1 rounded border text-xs font-medium flex-shrink-0 ${fitColors[fit as 'high' | 'medium' | 'low']}`}>
+                          {score}%
+                        </div>
+                      )
+                    })()}
                   </div>
                   
                   <div className="flex flex-wrap gap-1 mb-3">
@@ -909,9 +1587,183 @@ export default function SavedPage() {
                 </div>
               ))}
             </div>
+            </>
           )}
         </div>
       </main>
+
+      {/* Add/Edit Company Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowAddModal(false)}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between sticky top-0 bg-zinc-900">
+              <h2 className="text-lg font-semibold text-white">
+                {editingCompany ? 'Edit Company' : 'Add New Company'}
+              </h2>
+              <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-white text-xl">&times;</button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {formError && (
+                <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                  {formError}
+                </div>
+              )}
+
+              {/* Company Name */}
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Company Name *</label>
+                <input
+                  type="text"
+                  value={companyForm.company_name}
+                  onChange={e => setCompanyForm({ ...companyForm, company_name: e.target.value })}
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  placeholder="Acme Inc."
+                />
+              </div>
+
+              {/* Two columns */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Industry</label>
+                  <input
+                    type="text"
+                    value={companyForm.industry}
+                    onChange={e => setCompanyForm({ ...companyForm, industry: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                    placeholder="SaaS, FinTech, etc."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Country</label>
+                  <select
+                    value={companyForm.country}
+                    onChange={e => setCompanyForm({ ...companyForm, country: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  >
+                    <option value="">Select country</option>
+                    {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Website</label>
+                  <input
+                    type="text"
+                    value={companyForm.website}
+                    onChange={e => setCompanyForm({ ...companyForm, website: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                    placeholder="https://example.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Employee Count</label>
+                  <select
+                    value={companyForm.employee_count}
+                    onChange={e => setCompanyForm({ ...companyForm, employee_count: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  >
+                    <option value="">Select size</option>
+                    {COMPANY_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Funding Stage</label>
+                  <select
+                    value={companyForm.funding_stage}
+                    onChange={e => setCompanyForm({ ...companyForm, funding_stage: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  >
+                    <option value="">Select stage</option>
+                    {FUNDING_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Funding Amount</label>
+                  <input
+                    type="text"
+                    value={companyForm.funding_amount}
+                    onChange={e => setCompanyForm({ ...companyForm, funding_amount: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                    placeholder="$10M"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Founded Year</label>
+                  <input
+                    type="number"
+                    value={companyForm.founded_year}
+                    onChange={e => setCompanyForm({ ...companyForm, founded_year: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                    placeholder="2020"
+                    min="1900"
+                    max="2025"
+                  />
+                </div>
+              </div>
+
+              {/* Primary Contact */}
+              <div className="pt-4 border-t border-zinc-800">
+                <h3 className="text-sm font-medium text-zinc-400 mb-3">Primary Contact</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Contact Name</label>
+                    <input
+                      type="text"
+                      value={companyForm.last_prospect_name}
+                      onChange={e => setCompanyForm({ ...companyForm, last_prospect_name: e.target.value })}
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                      placeholder="John Smith"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Contact Title</label>
+                    <input
+                      type="text"
+                      value={companyForm.last_prospect_title}
+                      onChange={e => setCompanyForm({ ...companyForm, last_prospect_title: e.target.value })}
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                      placeholder="VP of Engineering"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Notes</label>
+                <textarea
+                  value={companyForm.notes}
+                  onChange={e => setCompanyForm({ ...companyForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400 h-20 resize-none"
+                  placeholder="Any additional notes about this company..."
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-zinc-800 flex gap-2">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-lg text-sm hover:bg-zinc-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveCompany}
+                disabled={saving}
+                className="flex-1 px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold hover:bg-yellow-300 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : editingCompany ? 'Update Company' : 'Add Company'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

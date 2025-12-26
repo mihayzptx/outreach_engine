@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 
 interface ProspectCompany {
@@ -59,8 +59,84 @@ export default function ProspectPage() {
   
   const [adding, setAdding] = useState(false)
   const [addedCount, setAddedCount] = useState(0)
+  const [icpSettings, setIcpSettings] = useState<any>(null)
+  const [sortByICP, setSortByICP] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    // Load ICP settings
+    try {
+      const stored = localStorage.getItem('llm-settings')
+      if (stored) {
+        const settings = JSON.parse(stored)
+        if (settings.icp) setIcpSettings(settings.icp)
+      }
+    } catch {}
+  }, [])
+
+  const calculateICPScore = (company: ProspectCompany): number => {
+    if (!icpSettings) return 0
+    
+    let score = 0
+    let maxScore = 0
+    
+    // Industry match
+    const industryMax = Math.max(...(icpSettings.industries?.filter((i: any) => i.enabled).map((i: any) => i.weight) || [0]), 0)
+    maxScore += industryMax
+    const companyIndustry = (company.industry || '').toLowerCase()
+    for (const ind of (icpSettings.industries || []).filter((i: any) => i.enabled)) {
+      if (companyIndustry.includes(ind.name.toLowerCase())) {
+        score += ind.weight
+        break
+      }
+    }
+    
+    // Size match
+    const sizeMax = Math.max(...(icpSettings.companySizes?.filter((s: any) => s.enabled).map((s: any) => s.weight) || [0]), 0)
+    maxScore += sizeMax
+    const sizeStr = company.size || ''
+    const sizeMatch = sizeStr.match(/(\d+)/g)
+    if (sizeMatch) {
+      const empCount = parseInt(sizeMatch[0])
+      for (const size of (icpSettings.companySizes || []).filter((s: any) => s.enabled)) {
+        if (empCount >= size.min && empCount <= size.max) {
+          score += size.weight
+          break
+        }
+      }
+    }
+    
+    // Geography match
+    const geoMax = Math.max(...(icpSettings.geographies?.filter((g: any) => g.enabled).map((g: any) => g.weight) || [0]), 0)
+    maxScore += geoMax
+    const location = (company.location || '').toLowerCase()
+    for (const geo of (icpSettings.geographies || []).filter((g: any) => g.enabled)) {
+      if (location.includes(geo.name.toLowerCase())) {
+        score += geo.weight
+        break
+      }
+    }
+    
+    // Signals match
+    const signalsMax = (icpSettings.buyingSignals || []).filter((s: any) => s.enabled).reduce((sum: number, s: any) => sum + s.points, 0)
+    maxScore += signalsMax
+    const signalText = (company.signals || []).map(s => s.toLowerCase()).join(' ')
+    for (const signal of (icpSettings.buyingSignals || []).filter((s: any) => s.enabled)) {
+      const words = signal.name.toLowerCase().split(' ')
+      if (words.some((w: string) => signalText.includes(w))) {
+        score += signal.points
+      }
+    }
+    
+    return maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
+  }
+
+  const getICPFit = (score: number): 'high' | 'medium' | 'low' => {
+    if (score >= 70) return 'high'
+    if (score >= 40) return 'medium'
+    return 'low'
+  }
 
   const search = async () => {
     if (!query.trim()) return
@@ -83,7 +159,14 @@ export default function ProspectPage() {
       const data = await res.json()
 
       if (data.success) {
-        setCompanies((data.companies || []).map((c: ProspectCompany) => ({ ...c, selected: false })))
+        let companiesData = (data.companies || []).map((c: ProspectCompany) => ({ ...c, selected: false }))
+        
+        // Sort by ICP score if enabled
+        if (sortByICP && icpSettings) {
+          companiesData.sort((a: ProspectCompany, b: ProspectCompany) => calculateICPScore(b) - calculateICPScore(a))
+        }
+        
+        setCompanies(companiesData)
         setContacts((data.contacts || []).map((c: ProspectContact) => ({ ...c, selected: false })))
         setSearchedQuery(data.searchQuery || query)
       }
@@ -326,6 +409,22 @@ export default function ProspectPage() {
                       <button onClick={() => setTab('contacts')} className={`px-4 py-1.5 rounded text-sm ${tab === 'contacts' ? 'bg-yellow-400 text-zinc-900' : 'text-zinc-400'}`}>👤 Contacts ({contacts.length})</button>
                     </div>
                     {searchedQuery && <span className="text-xs text-zinc-500">&quot;{searchedQuery}&quot;</span>}
+                    {icpSettings && (
+                      <label className="flex items-center gap-2 ml-auto cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={sortByICP} 
+                          onChange={e => {
+                            setSortByICP(e.target.checked)
+                            if (e.target.checked) {
+                              setCompanies([...companies].sort((a, b) => calculateICPScore(b) - calculateICPScore(a)))
+                            }
+                          }} 
+                          className="rounded" 
+                        />
+                        <span className="text-sm text-zinc-400">Sort by ICP</span>
+                      </label>
+                    )}
                   </div>
 
                   {tab === 'companies' && (
@@ -337,14 +436,22 @@ export default function ProspectPage() {
                         </label>
                       </div>
                       <div className="divide-y divide-zinc-800">
-                        {companies.map((c, idx) => (
+                        {companies.map((c, idx) => {
+                          const icpScore = icpSettings ? calculateICPScore(c) : 0
+                          const icpFit = getICPFit(icpScore)
+                          return (
                           <div key={idx} className={`p-4 hover:bg-zinc-800/30 ${c.selected ? 'bg-yellow-400/5' : ''}`}>
                             <div className="flex items-start gap-3">
                               <input type="checkbox" checked={c.selected || false} onChange={() => toggleCompany(idx)} className="mt-1 rounded" />
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-1">
                                   <h3 className="text-white font-medium">{c.name}</h3>
-                                  {c.icpFit && <span className={`px-2 py-0.5 text-[10px] rounded ${c.icpFit === 'high' ? 'bg-emerald-500/20 text-emerald-400' : c.icpFit === 'medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-zinc-700 text-zinc-400'}`}>{c.icpFit} fit</span>}
+                                  {icpSettings && (
+                                    <span className={`px-2 py-0.5 text-[10px] rounded font-medium ${icpFit === 'high' ? 'bg-emerald-500/20 text-emerald-400' : icpFit === 'medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-zinc-700 text-zinc-400'}`}>
+                                      ICP: {icpScore}%
+                                    </span>
+                                  )}
+                                  {!icpSettings && c.icpFit && <span className={`px-2 py-0.5 text-[10px] rounded ${c.icpFit === 'high' ? 'bg-emerald-500/20 text-emerald-400' : c.icpFit === 'medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-zinc-700 text-zinc-400'}`}>{c.icpFit} fit</span>}
                                 </div>
                                 {c.description && <p className="text-zinc-400 text-sm mb-2">{c.description}</p>}
                                 <div className="flex items-center gap-4 text-xs text-zinc-500">
@@ -361,7 +468,7 @@ export default function ProspectPage() {
                               <a href={c.sourceUrl} target="_blank" className="text-xs text-zinc-500 hover:text-white">{c.source} →</a>
                             </div>
                           </div>
-                        ))}
+                        )})}
                       </div>
                     </div>
                   )}

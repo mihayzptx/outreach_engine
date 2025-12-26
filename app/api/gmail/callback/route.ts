@@ -5,19 +5,27 @@ import jwt from 'jsonwebtoken'
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/gmail/callback'
+const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/gmail/callback'
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
   const error = searchParams.get('error')
+  const acceptHeader = request.headers.get('accept') || ''
+  const wantsJson = acceptHeader.includes('application/json')
 
   if (error) {
+    if (wantsJson) {
+      return NextResponse.json({ success: false, error: error }, { status: 400 })
+    }
     return NextResponse.redirect('/settings?gmail=error&reason=' + error)
   }
 
   if (!code) {
+    if (wantsJson) {
+      return NextResponse.json({ success: false, error: 'No authorization code' }, { status: 400 })
+    }
     return NextResponse.redirect('/settings?gmail=error&reason=no_code')
   }
 
@@ -39,6 +47,9 @@ export async function GET(request: Request) {
 
     if (tokens.error) {
       console.error('Token error:', tokens)
+      if (wantsJson) {
+        return NextResponse.json({ success: false, error: tokens.error_description || tokens.error }, { status: 400 })
+      }
       return NextResponse.redirect('/settings?gmail=error&reason=token_error')
     }
 
@@ -77,9 +88,15 @@ export async function GET(request: Request) {
         updated_at = NOW()
     `
 
+    if (wantsJson) {
+      return NextResponse.json({ success: true, email: userInfo.email })
+    }
     return NextResponse.redirect('/settings?gmail=connected')
   } catch (error: any) {
     console.error('Gmail callback error:', error)
+    if (wantsJson) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    }
     return NextResponse.redirect('/settings?gmail=error&reason=' + encodeURIComponent(error.message))
   }
 }

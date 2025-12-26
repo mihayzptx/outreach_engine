@@ -251,7 +251,11 @@ Extract and return a JSON object with:
   }
 }
 
-Be specific and factual. If information isn't found, use 'unknown' or empty arrays.
+IMPORTANT RULES:
+1. For keyPeople, ONLY include C-level executives (CEO, CTO, COO, CFO), Founders, VPs, and Directors. Do NOT include individual contributors like engineers, QA, analysts, etc.
+2. Order keyPeople by seniority: CEO/Founder first, then CTO/COO, then VPs, then Directors.
+3. For headquarters, provide city and country/state - NOT follower counts or employee numbers.
+4. Be specific and factual. If information isn't found, use 'unknown' or empty arrays.
 Return ONLY the JSON object.`
 
     const analysisResult = await analyzeWithLLM(
@@ -284,7 +288,38 @@ Return ONLY the JSON object.`
     progress.push('Research complete')
 
     // PHASE 4: Store in database
-    if (company_id && company_id > 0) {
+    // Find or create company first if company_id is 0
+    let effectiveCompanyId = company_id
+    
+    if (!effectiveCompanyId || effectiveCompanyId === 0) {
+      try {
+        // Try to find existing company by name
+        const existingResult = await sql`
+          SELECT id FROM saved_companies 
+          WHERE LOWER(company_name) = LOWER(${company_name})
+          LIMIT 1
+        `
+        
+        if (existingResult.rows.length > 0) {
+          effectiveCompanyId = existingResult.rows[0].id
+          progress.push(`Found existing company ID: ${effectiveCompanyId}`)
+        } else {
+          // Create new company
+          const insertResult = await sql`
+            INSERT INTO saved_companies (company_name, industry, source, created_at, updated_at)
+            VALUES (${company_name}, ${industry || research.companyInfo.industry || ''}, 'chrome_extension', NOW(), NOW())
+            RETURNING id
+          `
+          effectiveCompanyId = insertResult.rows[0].id
+          progress.push(`Created new company ID: ${effectiveCompanyId}`)
+        }
+      } catch (findError: any) {
+        console.error('Find/create company error:', findError)
+        errors.push(`Company lookup error: ${findError.message}`)
+      }
+    }
+    
+    if (effectiveCompanyId && effectiveCompanyId > 0) {
       // Prepare signal data in expected format
       const signalData = {
         detected: research.signals.map(s => ({
@@ -352,7 +387,7 @@ Return ONLY the JSON object.`
       }
 
       try {
-        await sql.query(
+        const updateResult = await sql.query(
           `UPDATE saved_companies 
            SET signal_data = $1::jsonb,
                research_links_data = $2::jsonb,
@@ -366,7 +401,8 @@ Return ONLY the JSON object.`
                funding_stage = COALESCE(NULLIF($9, ''), funding_stage),
                funding_amount = COALESCE(NULLIF($10, ''), funding_amount),
                updated_at = NOW()
-           WHERE id = $11`,
+           WHERE id = $11
+           RETURNING id, company_name`,
           [
             JSON.stringify(signalData),
             JSON.stringify(linksData),
@@ -378,9 +414,14 @@ Return ONLY the JSON object.`
             research.companyInfo.headquarters !== 'unknown' ? research.companyInfo.headquarters : null,
             research.fundingHistory.lastRound !== 'unknown' ? research.fundingHistory.lastRound : null,
             research.fundingHistory.lastRoundAmount !== 'unknown' ? research.fundingHistory.lastRoundAmount : null,
-            company_id
+            effectiveCompanyId
           ]
         )
+        if (updateResult.rowCount && updateResult.rowCount > 0) {
+          progress.push(`Updated company: ${updateResult.rows[0]?.company_name} (ID: ${effectiveCompanyId})`)
+        } else {
+          errors.push(`No rows updated for ID: ${effectiveCompanyId}`)
+        }
       } catch (dbError: any) {
         console.error('Database update failed:', dbError)
         errors.push(`DB error: ${dbError.message}`)
@@ -391,6 +432,7 @@ Return ONLY the JSON object.`
     return NextResponse.json({
       success: true,
       research,
+      company_id: effectiveCompanyId,
       stats: {
         sourcesSearched: searchQueries.length,
         sourcesFound: uniqueResults.length,
