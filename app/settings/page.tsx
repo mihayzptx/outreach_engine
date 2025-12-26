@@ -1,1186 +1,1561 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 
-const LABEL_COLORS: Record<string, string> = {
-  'Hot Lead': 'bg-red-500', 'Warm': 'bg-orange-500', 'Nurture': 'bg-amber-500',
-  'Strategic': 'bg-purple-500', 'Partner': 'bg-blue-500', 'Enterprise': 'bg-indigo-500',
-  'SMB': 'bg-emerald-500', 'Expansion': 'bg-pink-500', 'At Risk': 'bg-rose-600', 'New': 'bg-cyan-500'
+interface ICPSettings {
+  industries: { name: string; weight: number; enabled: boolean }[]
+  companySizes: { min: number; max: number; label: string; weight: number; enabled: boolean }[]
+  fundingStages: { name: string; weight: number; enabled: boolean }[]
+  geographies: { name: string; weight: number; enabled: boolean }[]
+  companyAge: { min: number; max: number; weight: number }
+  buyingSignals: { name: string; points: number; enabled: boolean }[]
+  negativeSignals: { name: string; points: number; enabled: boolean }[]
+  targetTitles: { title: string; priority: 'primary' | 'secondary' }[]
+  techStack: { name: string; weight: number; enabled: boolean }[]
 }
 
-const SIGNAL_COLORS: Record<string, string> = {
-  hiring: 'bg-blue-500', funding: 'bg-emerald-500', acquisition: 'bg-purple-500', product: 'bg-orange-500',
-  conference: 'bg-pink-500', media: 'bg-cyan-500', blog: 'bg-amber-500', award: 'bg-yellow-500'
-}
-
-const GRADE_COLORS: Record<string, string> = {
-  'A': 'bg-emerald-500 text-white', 'B': 'bg-blue-500 text-white', 'C': 'bg-yellow-500 text-zinc-900',
-  'D': 'bg-orange-500 text-white', 'E': 'bg-red-500 text-white'
-}
-
-const PREDEFINED_LABELS = Object.keys(LABEL_COLORS)
-const COUNTRIES = ['United States', 'United Kingdom', 'Canada', 'Germany', 'France', 'Australia', 'Netherlands', 'Ireland', 'Singapore', 'UAE', 'Israel']
-const COMPANY_SIZES = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5000+']
-const FUNDING_STAGES = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D+', 'Private Equity', 'IPO/Public']
-const REVENUE_RANGES = ['<$1M', '$1M-$10M', '$10M-$50M', '$50M-$100M', '$100M-$500M', '>$500M']
-
-interface Company {
-  id: number
-  company_name: string
-  industry: string
-  country?: string
-  labels?: string[]
-  notes?: string
-  website?: string
-  employee_count?: string
-  revenue_range?: string
-  last_prospect_name: string
-  last_prospect_title: string
-  last_context: string
-  last_message_type: string
-  has_new_signals: boolean
-  signal_data?: {
-    detected?: any[]
-    count?: number
-    high_priority?: number
-    medium_priority?: number
-    scanned_at?: string
-  } | any[]
-  research_links_data?: any[]
-  lead_grade?: string
-  lead_score?: number
-  grading_data?: any
-  founded_year?: number
-  funding_stage?: string
-  funding_amount?: string
-  is_hiring?: boolean
-  buyer_intent?: boolean
-  signal_count?: number
-  is_archived?: boolean
-  archived_at?: string
-  icp_score?: number
-  icp_fit?: 'high' | 'medium' | 'low'
-  icp_breakdown?: any
-  icp_scored_at?: string
-  extracted_info?: {
-    description?: string
-    industry?: string
-    founded?: string
-    headquarters?: string
-    employeeCount?: string
-    techStack?: string[]
-    competitors?: string[]
-    fundingTotal?: string
-    lastRound?: string
-    lastRoundAmount?: string
-    lastRoundDate?: string
-    investors?: string[]
-    keyPeople?: { name: string; title: string; linkedin?: string }[]
-    painPoints?: string[]
-    outreachAngles?: string[]
-    icpScore?: number
-    icpReasons?: string[]
-    icpConcerns?: string[]
-    researchedAt?: string
+interface Settings {
+  temperature: number
+  maxTokens: number
+  topP: number
+  frequencyPenalty: number
+  presencePenalty: number
+  localModel: string
+  localEndpoint: string
+  cloudModel: string
+  systemPromptBase: string
+  bannedPhrases: string[]
+  goodOpeners: string[]
+  companyDescription: string
+  services: string[]
+  idealCustomerSignals: string[]
+  abmExamples: string[]
+  gradingCriteria: {
+    priority: { name: string; weight: number }[]
+    important: { name: string; weight: number }[]
+    bonus: { name: string; weight: number }[]
   }
-  created_at: string
-  updated_at: string
+  signalSettings: {
+    timeframeDays: number
+    enabledSignals: string[]
+    signalPatterns: {
+      category: string
+      label: string
+      icon: string
+      priority: 'high' | 'medium' | 'low'
+      keywords: string[]
+      enabled: boolean
+    }[]
+  }
+  icp: ICPSettings
 }
 
-export default function SavedPage() {
-  const [companies, setCompanies] = useState<Company[]>([])
-  const [filtered, setFiltered] = useState<Company[]>([])
-  const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<Company | null>(null)
+const defaultICPSettings: ICPSettings = {
+  industries: [
+    { name: 'SaaS', weight: 10, enabled: true },
+    { name: 'Fintech', weight: 8, enabled: true },
+    { name: 'Healthcare Tech', weight: 7, enabled: true },
+    { name: 'E-commerce', weight: 6, enabled: true },
+    { name: 'AI/ML', weight: 9, enabled: true },
+    { name: 'Cybersecurity', weight: 8, enabled: true },
+    { name: 'Developer Tools', weight: 9, enabled: true },
+    { name: 'Data/Analytics', weight: 7, enabled: true },
+    { name: 'EdTech', weight: 5, enabled: false },
+    { name: 'MarTech', weight: 5, enabled: false }
+  ],
+  companySizes: [
+    { min: 1, max: 50, label: '1-50', weight: 3, enabled: true },
+    { min: 51, max: 200, label: '51-200', weight: 10, enabled: true },
+    { min: 201, max: 500, label: '201-500', weight: 8, enabled: true },
+    { min: 501, max: 1000, label: '501-1000', weight: 5, enabled: true },
+    { min: 1001, max: 100000, label: '1000+', weight: 2, enabled: false }
+  ],
+  fundingStages: [
+    { name: 'Seed', weight: 5, enabled: true },
+    { name: 'Series A', weight: 10, enabled: true },
+    { name: 'Series B', weight: 10, enabled: true },
+    { name: 'Series C', weight: 8, enabled: true },
+    { name: 'Series D+', weight: 5, enabled: true },
+    { name: 'Public', weight: 2, enabled: false },
+    { name: 'Bootstrapped', weight: 4, enabled: true }
+  ],
+  geographies: [
+    { name: 'United States', weight: 10, enabled: true },
+    { name: 'Canada', weight: 8, enabled: true },
+    { name: 'United Kingdom', weight: 7, enabled: true },
+    { name: 'Germany', weight: 6, enabled: true },
+    { name: 'Western Europe', weight: 6, enabled: true },
+    { name: 'Australia', weight: 5, enabled: true },
+    { name: 'Israel', weight: 7, enabled: true }
+  ],
+  companyAge: { min: 2, max: 15, weight: 5 },
+  buyingSignals: [
+    { name: 'Recently Funded', points: 20, enabled: true },
+    { name: 'Hiring DevOps/Platform Engineers', points: 15, enabled: true },
+    { name: 'New CTO/VP Engineering', points: 12, enabled: true },
+    { name: 'Post-Acquisition Integration', points: 15, enabled: true },
+    { name: 'Rapid Headcount Growth', points: 10, enabled: true },
+    { name: 'Cloud Migration Announced', points: 12, enabled: true },
+    { name: 'Infrastructure Problems Mentioned', points: 15, enabled: true },
+    { name: 'Scaling Challenges', points: 12, enabled: true },
+    { name: 'Security/Compliance Needs', points: 10, enabled: true }
+  ],
+  negativeSignals: [
+    { name: 'Large Internal DevOps Team', points: -15, enabled: true },
+    { name: 'Recent Layoffs', points: -10, enabled: true },
+    { name: 'Competitor Customer', points: -20, enabled: true },
+    { name: 'Government/Public Sector', points: -5, enabled: true },
+    { name: 'Consulting/Agency', points: -10, enabled: true }
+  ],
+  targetTitles: [
+    { title: 'CTO', priority: 'primary' },
+    { title: 'VP of Engineering', priority: 'primary' },
+    { title: 'VP of Infrastructure', priority: 'primary' },
+    { title: 'Head of Platform', priority: 'primary' },
+    { title: 'Director of Engineering', priority: 'secondary' },
+    { title: 'Director of DevOps', priority: 'secondary' },
+    { title: 'Engineering Manager', priority: 'secondary' }
+  ],
+  techStack: [
+    { name: 'AWS', weight: 8, enabled: true },
+    { name: 'GCP', weight: 8, enabled: true },
+    { name: 'Azure', weight: 7, enabled: true },
+    { name: 'Kubernetes', weight: 10, enabled: true },
+    { name: 'Terraform', weight: 9, enabled: true },
+    { name: 'Docker', weight: 7, enabled: true },
+    { name: 'Jenkins', weight: 6, enabled: true },
+    { name: 'GitHub Actions', weight: 7, enabled: true },
+    { name: 'GitLab CI', weight: 7, enabled: true },
+    { name: 'Datadog', weight: 6, enabled: true }
+  ]
+}
+
+const defaultSettings: Settings = {
+  temperature: 0.7,
+  maxTokens: 500,
+  topP: 0.9,
+  frequencyPenalty: 0.3,
+  presencePenalty: 0.3,
+  localModel: 'llama3.2',
+  localEndpoint: 'http://localhost:11434',
+  cloudModel: 'llama-3.3-70b-versatile',
+  systemPromptBase: 'You write cold outreach for Tech-stack.io. Your messages are short, specific, and never generic.',
+  bannedPhrases: [
+    "I hope this finds you well",
+    "I wanted to reach out",
+    "I came across your profile",
+    "I noticed that",
+    "I'd love to connect",
+    "Pick your brain",
+    "Quick question",
+    "Not sure if you're the right person",
+    "I know you're busy",
+    "We help companies like yours",
+    "Synergy",
+    "Leverage",
+    "Circle back"
+  ],
+  goodOpeners: [
+    "Saw [company] just [specific event]...",
+    "[Relevant industry trend] is hitting [their sector]...",
+    "Your [specific project/initiative] caught my attention...",
+    "The [specific news] about [company] is interesting...",
+    "Congrats on [specific achievement]..."
+  ],
+  companyDescription: "Tech-stack.io is a 200+ person DevOps services company headquartered in Houston, TX. We help companies scale their infrastructure, implement CI/CD, and augment their platform teams.",
+  services: [
+    "Cloud Infrastructure Optimization (AWS, GCP, Azure)",
+    "CI/CD Implementation (Jenkins, GitLab CI, GitHub Actions)",
+    "Kubernetes & Container Orchestration",
+    "Team Augmentation (embedded senior DevOps engineers)",
+    "Platform Engineering",
+    "Infrastructure as Code (Terraform, Pulumi)",
+    "Observability & Monitoring (Datadog, Prometheus, Grafana)",
+    "Security & Compliance (SOC2, HIPAA, PCI-DSS)"
+  ],
+  idealCustomerSignals: [
+    "Just raised funding (Series A, B, C)",
+    "Post-acquisition integration",
+    "Rapid growth / scaling challenges",
+    "Cloud cost problems",
+    "Security audit coming",
+    "Platform team too small",
+    "Legacy modernization needs",
+    "DevOps hiring struggles"
+  ],
+  abmExamples: [
+    "Congrats on the Series B - exciting times ahead for {company}.",
+    "Saw {name} mention the expansion plans. Impressive growth.",
+    "The award recognition is well deserved. Strong way to finish the year."
+  ],
+  gradingCriteria: {
+    priority: [
+      { name: 'Recent Funding', weight: 20 },
+      { name: 'Hiring DevOps/Platform', weight: 15 },
+      { name: 'Tech Stack Match', weight: 15 }
+    ],
+    important: [
+      { name: 'Growth Stage', weight: 10 },
+      { name: 'Industry Fit', weight: 10 },
+      { name: 'Company Size (50-500)', weight: 10 }
+    ],
+    bonus: [
+      { name: 'Recent News/PR', weight: 5 },
+      { name: 'Conference Attendance', weight: 5 },
+      { name: 'Engaged on LinkedIn', weight: 5 }
+    ]
+  },
+  signalSettings: {
+    timeframeDays: 90,
+    enabledSignals: ['funding', 'hiring', 'leadership', 'expansion', 'acquisition', 'awards', 'product', 'tech_stack'],
+    signalPatterns: [
+      { category: 'funding', label: 'Funding', icon: '💰', priority: 'high', keywords: ['raised', 'funding', 'series', 'seed', 'investment', 'venture', 'capital', 'million', 'billion'], enabled: true },
+      { category: 'hiring', label: 'Hiring', icon: '👥', priority: 'high', keywords: ['hiring', 'job', 'career', 'engineer', 'devops', 'platform', 'sre', 'infrastructure', 'growing team'], enabled: true },
+      { category: 'leadership', label: 'Leadership', icon: '👔', priority: 'medium', keywords: ['appoint', 'hire', 'promote', 'cto', 'ceo', 'vp', 'chief', 'head of', 'joins', 'new role'], enabled: true },
+      { category: 'expansion', label: 'Expansion', icon: '🌍', priority: 'medium', keywords: ['expand', 'office', 'location', 'market', 'international', 'global', 'launch', 'new region'], enabled: true },
+      { category: 'acquisition', label: 'M&A', icon: '🤝', priority: 'high', keywords: ['acquire', 'acquisition', 'merger', 'merge', 'bought', 'purchase', 'deal'], enabled: true },
+      { category: 'awards', label: 'Awards', icon: '🏆', priority: 'low', keywords: ['award', 'win', 'recognized', 'ranked', 'best', 'top', 'fastest', 'inc 500', 'forbes'], enabled: true },
+      { category: 'product', label: 'Product', icon: '🚀', priority: 'medium', keywords: ['launch', 'announce', 'release', 'product', 'feature', 'platform', 'new version'], enabled: true },
+      { category: 'tech_stack', label: 'Tech Stack', icon: '⚙️', priority: 'medium', keywords: ['aws', 'azure', 'gcp', 'kubernetes', 'k8s', 'terraform', 'docker', 'devops', 'ci/cd', 'jenkins'], enabled: true }
+    ]
+  },
+  icp: defaultICPSettings
+}
+
+export default function SettingsPage() {
+  const [settings, setSettings] = useState<Settings>(defaultSettings)
+  const [saved, setSaved] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'signals' | 'grading' | 'links'>('overview')
-  const [refreshing, setRefreshing] = useState<number | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterGrade, setFilterGrade] = useState('')
-  const [sortBy, setSortBy] = useState('grade_desc')
-  const [gradingForm, setGradingForm] = useState<any>({})
-  const [showLabelPicker, setShowLabelPicker] = useState(false)
-  const [researchingAll, setResearchingAll] = useState(false)
-  const [researchProgress, setResearchProgress] = useState({ current: 0, total: 0 })
-  const [showArchived, setShowArchived] = useState(false)
-  const [signalDebug, setSignalDebug] = useState<any>(null)
-  const [icpSettings, setIcpSettings] = useState<any>(null)
-  const [filterICP, setFilterICP] = useState('')
-  const [scoringAll, setScoringAll] = useState(false)
-  const router = useRouter()
+  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'grading' | 'signals' | 'icp' | 'integrations'>('model')
+  const [newPhrase, setNewPhrase] = useState('')
+  const [newOpener, setNewOpener] = useState('')
+  const [newService, setNewService] = useState('')
+  const [newSignal, setNewSignal] = useState('')
+  const [newAbm, setNewAbm] = useState('')
+  const [newIndustry, setNewIndustry] = useState('')
+  const [newGeo, setNewGeo] = useState('')
+  const [newTitle, setNewTitle] = useState('')
+  const [newTech, setNewTech] = useState('')
+  const [newBuyingSignal, setNewBuyingSignal] = useState('')
+  const [newNegativeSignal, setNewNegativeSignal] = useState('')
 
-  useEffect(() => { 
-    fetchCompanies() 
-    loadICPSettings()
+  useEffect(() => {
+    const stored = localStorage.getItem('llm-settings')
+    if (stored) {
+      try { setSettings({ ...defaultSettings, ...JSON.parse(stored) }) } catch {}
+    }
   }, [])
-  useEffect(() => { applyFilters() }, [companies, searchQuery, filterGrade, filterICP, sortBy, showArchived])
 
-  const loadICPSettings = () => {
+  const saveSettings = async () => {
+    // Save to localStorage first
+    localStorage.setItem('llm-settings', JSON.stringify(settings))
+    
+    // Save to database for cross-device sync
     try {
-      const stored = localStorage.getItem('llm-settings')
-      if (stored) {
-        const settings = JSON.parse(stored)
-        if (settings.icp) {
-          setIcpSettings(settings.icp)
-        }
-      }
-    } catch {}
-  }
-
-  const calculateICPScore = (company: Company): { score: number; fit: 'high' | 'medium' | 'low' } => {
-    if (!icpSettings) return { score: 0, fit: 'low' }
-    
-    let score = 0
-    let maxScore = 0
-    
-    // Industry match
-    const industryMax = Math.max(...(icpSettings.industries?.filter((i: any) => i.enabled).map((i: any) => i.weight) || [0]), 0)
-    maxScore += industryMax
-    const companyIndustry = (company.industry || company.extracted_info?.industry || '').toLowerCase()
-    for (const ind of (icpSettings.industries || []).filter((i: any) => i.enabled)) {
-      if (companyIndustry.includes(ind.name.toLowerCase())) {
-        score += ind.weight
-        break
-      }
-    }
-    
-    // Company size match
-    const sizeMax = Math.max(...(icpSettings.companySizes?.filter((s: any) => s.enabled).map((s: any) => s.weight) || [0]), 0)
-    maxScore += sizeMax
-    const empStr = company.employee_count || company.extracted_info?.employeeCount || ''
-    const empMatch = empStr.match(/(\d+)/g)
-    if (empMatch) {
-      const empCount = parseInt(empMatch[0])
-      for (const size of (icpSettings.companySizes || []).filter((s: any) => s.enabled)) {
-        if (empCount >= size.min && empCount <= size.max) {
-          score += size.weight
-          break
-        }
-      }
-    }
-    
-    // Funding stage match
-    const fundingMax = Math.max(...(icpSettings.fundingStages?.filter((f: any) => f.enabled).map((f: any) => f.weight) || [0]), 0)
-    maxScore += fundingMax
-    const funding = (company.funding_stage || company.extracted_info?.lastRound || '').toLowerCase()
-    for (const stage of (icpSettings.fundingStages || []).filter((f: any) => f.enabled)) {
-      if (funding.includes(stage.name.toLowerCase())) {
-        score += stage.weight
-        break
-      }
-    }
-    
-    // Geography match
-    const geoMax = Math.max(...(icpSettings.geographies?.filter((g: any) => g.enabled).map((g: any) => g.weight) || [0]), 0)
-    maxScore += geoMax
-    const location = (company.country || company.extracted_info?.headquarters || '').toLowerCase()
-    for (const geo of (icpSettings.geographies || []).filter((g: any) => g.enabled)) {
-      if (location.includes(geo.name.toLowerCase())) {
-        score += geo.weight
-        break
-      }
-    }
-    
-    // Buying signals
-    const signalsMax = (icpSettings.buyingSignals || []).filter((s: any) => s.enabled).reduce((sum: number, s: any) => sum + s.points, 0)
-    maxScore += signalsMax
-    const signals = getSignals(company)
-    const signalText = signals.map((s: any) => (s.detail || s.content || s.label || '').toLowerCase()).join(' ')
-    for (const signal of (icpSettings.buyingSignals || []).filter((s: any) => s.enabled)) {
-      const words = signal.name.toLowerCase().split(' ')
-      if (words.some((w: string) => signalText.includes(w))) {
-        score += signal.points
-      }
-    }
-    
-    // Tech stack
-    const techMax = (icpSettings.techStack || []).filter((t: any) => t.enabled).reduce((sum: number, t: any) => sum + t.weight, 0)
-    maxScore += techMax
-    const techStack = (company.extracted_info?.techStack || []).map((t: string) => t.toLowerCase()).join(' ')
-    for (const tech of (icpSettings.techStack || []).filter((t: any) => t.enabled)) {
-      if (techStack.includes(tech.name.toLowerCase())) {
-        score += tech.weight
-      }
-    }
-    
-    // Normalize to 0-100
-    const normalizedScore = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
-    
-    let fit: 'high' | 'medium' | 'low' = 'low'
-    if (normalizedScore >= 70) fit = 'high'
-    else if (normalizedScore >= 40) fit = 'medium'
-    
-    return { score: normalizedScore, fit }
-  }
-
-  const fetchCompanies = async () => {
-    try {
-      const res = await fetch('/api/companies', { cache: 'no-store' })
-      const data = await res.json()
-      setCompanies(data.companies || [])
-    } catch { }
-    finally { setLoading(false) }
-  }
-
-  const applyFilters = () => {
-    let result = [...companies]
-    
-    // Filter archived
-    if (!showArchived) {
-      result = result.filter(c => !c.is_archived)
-    } else {
-      result = result.filter(c => c.is_archived)
-    }
-    
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      result = result.filter(c => c.company_name.toLowerCase().includes(q) || c.last_prospect_name?.toLowerCase().includes(q))
-    }
-    if (filterGrade) result = result.filter(c => c.lead_grade === filterGrade)
-    
-    // ICP filter
-    if (filterICP && icpSettings) {
-      result = result.filter(c => {
-        const { fit } = calculateICPScore(c)
-        return fit === filterICP
-      })
-    }
-    
-    result.sort((a, b) => {
-      switch (sortBy) {
-        case 'grade_desc':
-          const gradeOrder: Record<string, number> = { A: 5, B: 4, C: 3, D: 2, E: 1 }
-          return (gradeOrder[b.lead_grade || ''] || 0) - (gradeOrder[a.lead_grade || ''] || 0)
-        case 'signals_desc': return (b.signal_count || 0) - (a.signal_count || 0)
-        case 'name_asc': return a.company_name.localeCompare(b.company_name)
-        case 'recent': return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        case 'icp_desc':
-          if (!icpSettings) return 0
-          const scoreA = calculateICPScore(a).score
-          const scoreB = calculateICPScore(b).score
-          return scoreB - scoreA
-        default: return 0
-      }
-    })
-    setFiltered(result)
-  }
-
-  const refreshCompany = async (id: number, name: string, industry: string) => {
-    setRefreshing(id)
-    setSignalDebug(null)
-    try {
-      // Get settings from localStorage
-      let companyProfile = ''
-      try {
-        const stored = localStorage.getItem('llm-settings')
-        if (stored) {
-          const settings = JSON.parse(stored)
-          companyProfile = settings.companyDescription || ''
-        }
-      } catch {}
-      
-      // Use deep research for comprehensive analysis
-      const res = await fetch('/api/companies/deep-research', {
+      // Save full settings
+      await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          company_id: id, 
-          company_name: name, 
-          industry, 
-          companyProfile 
-        }),
-        cache: 'no-store'
-      })
-      const data = await res.json()
-      console.log('Deep research response:', data)
-      
-      // Store debug info for display
-      setSignalDebug({ 
-        stats: data.stats, 
-        progress: data.progress,
-        errors: data.errors,
-        research: data.research,
-        timestamp: new Date().toISOString() 
-      })
-      
-      if (data.success) {
-        // Fetch fresh data from database
-        const companiesRes = await fetch('/api/companies?t=' + Date.now(), { cache: 'no-store' })
-        const companiesData = await companiesRes.json()
-        const freshCompanies = companiesData.companies || []
-        
-        setCompanies(freshCompanies)
-        
-        // Update selected with fresh data
-        const updatedCompany = freshCompanies.find((c: Company) => c.id === id)
-        if (updatedCompany) {
-          setSelected(updatedCompany)
-          // Auto-fill grading from research
-          const info = data.research || {}
-          setGradingForm({
-            buyerIntent: info.signals?.some((s: any) => s.category === 'funding'),
-            activelyHiring: info.signals?.some((s: any) => s.category === 'hiring'),
-            fundingStage: info.fundingHistory?.lastRound !== 'unknown' ? info.fundingHistory?.lastRound : undefined,
-            fundingAmount: info.fundingHistory?.lastRoundAmount !== 'unknown' ? info.fundingHistory?.lastRoundAmount : undefined,
-            companySize: info.companyInfo?.employeeCount !== 'unknown' ? info.companyInfo?.employeeCount : undefined,
-            geography: info.companyInfo?.headquarters !== 'unknown' ? info.companyInfo?.headquarters : undefined,
-            yearFounded: info.companyInfo?.founded !== 'unknown' ? info.companyInfo?.founded : undefined,
-            industry: info.companyInfo?.industry || industry
-          })
-        }
-      } else {
-        console.error('Research failed:', data.error)
-      }
-    } catch (e) {
-      console.error('Research error:', e)
-      setSignalDebug({ errors: [(e as Error).message] })
-    }
-    finally { setRefreshing(null) }
-  }
-
-  const deleteCompany = async (id: number) => {
-    if (!confirm('Delete this company?')) return
-    await fetch(`/api/companies?id=${id}`, { method: 'DELETE' })
-    setSelected(null)
-    fetchCompanies()
-  }
-
-  const archiveCompany = async (id: number) => {
-    await updateCompany(id, { is_archived: true, archived_at: new Date().toISOString() })
-    setSelected(null)
-  }
-
-  const unarchiveCompany = async (id: number) => {
-    await updateCompany(id, { is_archived: false, archived_at: null })
-    setSelected(null)
-  }
-
-  const researchAllCompanies = async () => {
-    // Research all companies without signal data OR all if forced
-    const toResearch = companies.filter(c => !c.is_archived && (!c.signal_data || c.signal_count === 0 || !c.extracted_info))
-    if (toResearch.length === 0) {
-      if (confirm('All companies already have research. Re-scan all?')) {
-        // Re-scan all non-archived
-        const allActive = companies.filter(c => !c.is_archived)
-        if (allActive.length === 0) return
-        await runResearchBatch(allActive)
-      }
-      return
-    }
-    await runResearchBatch(toResearch)
-  }
-
-  const runResearchBatch = async (toResearch: Company[]) => {
-    // Get settings
-    let companyProfile = ''
-    try {
-      const stored = localStorage.getItem('llm-settings')
-      if (stored) {
-        const settings = JSON.parse(stored)
-        companyProfile = settings.companyDescription || ''
-      }
-    } catch {}
-    
-    setResearchingAll(true)
-    setResearchProgress({ current: 0, total: toResearch.length })
-    
-    for (let i = 0; i < toResearch.length; i++) {
-      const c = toResearch[i]
-      try {
-        const res = await fetch('/api/companies/deep-research', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            company_id: c.id, 
-            company_name: c.company_name, 
-            industry: c.industry,
-            companyProfile
-          })
+          userId: 'default',
+          settings: {
+            llm: {
+              temperature: settings.temperature,
+              maxTokens: settings.maxTokens,
+              topP: settings.topP,
+              frequencyPenalty: settings.frequencyPenalty,
+              presencePenalty: settings.presencePenalty,
+              localModel: settings.localModel,
+              localEndpoint: settings.localEndpoint,
+              cloudModel: settings.cloudModel
+            },
+            prompts: {
+              systemPromptBase: settings.systemPromptBase,
+              bannedPhrases: settings.bannedPhrases,
+              goodOpeners: settings.goodOpeners
+            },
+            company: {
+              companyDescription: settings.companyDescription,
+              services: settings.services,
+              idealCustomerSignals: settings.idealCustomerSignals,
+              abmExamples: settings.abmExamples
+            },
+            grading: settings.gradingCriteria,
+            signals: settings.signalSettings,
+            icp: settings.icp
+          }
         })
-        const data = await res.json()
-        console.log(`Research ${i + 1}/${toResearch.length}: ${c.company_name}`, data.success ? '✓' : '✗')
-      } catch (e) {
-        console.error('Research failed for', c.company_name, e)
-      }
-      setResearchProgress({ current: i + 1, total: toResearch.length })
+      })
       
-      // Small delay between requests to avoid rate limits
-      if (i < toResearch.length - 1) {
-        await new Promise(r => setTimeout(r, 500))
-      }
-    }
-    
-    await fetchCompanies()
-    setResearchingAll(false)
-  }
-
-  const rescoreAllCompanies = async () => {
-    if (!icpSettings) return
-    
-    const toScore = companies.filter(c => !c.is_archived)
-    if (toScore.length === 0) return
-    
-    setScoringAll(true)
-    
-    try {
-      // Batch score all companies
-      const res = await fetch('/api/icp/score', {
-        method: 'PUT',
+      // Also save ICP separately for extension sync
+      await fetch('/api/settings/icp', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companies: toScore.map(c => ({
-            id: c.id,
-            company_name: c.company_name,
-            industry: c.industry,
-            employee_count: c.employee_count,
-            funding_stage: c.funding_stage,
-            country: c.country,
-            signals: getSignals(c).map((s: any) => s.detail || s.category || ''),
-            extracted_info: c.extracted_info
-          })),
-          icpSettings,
-          saveToDb: true
+        body: JSON.stringify({ 
+          userId: 'default',
+          icp: settings.icp 
         })
       })
-      
-      const data = await res.json()
-      console.log('ICP Scoring complete:', data)
-      
-      // Refresh companies to get updated scores
-      await fetchCompanies()
-      
     } catch (e) {
-      console.error('ICP scoring failed:', e)
+      console.error('Failed to sync settings to database:', e)
     }
     
-    setScoringAll(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
   }
 
-  const updateCompany = async (id: number, updates: any) => {
-    await fetch('/api/companies/update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ...updates })
-    })
-    fetchCompanies()
-    if (selected?.id === id) setSelected(prev => prev ? { ...prev, ...updates } : null)
-  }
-
-  const calculateGrade = (data: any) => {
-    let total = 0, max = 0
-    if (data.buyerIntent) { total += 15 }; max += 15
-    if (data.activelyHiring) { total += 15 }; max += 15
-    if (data.fundingStage) { total += 12; max += 15 }
-    if (data.fundingAmount) { total += 12; max += 15 }
-    if (data.revenueRange) { total += 12; max += 15 }
-    if (data.companySize) { total += 8; max += 10 }
-    if (data.geography) { total += 8; max += 10 }
-    if (data.yearFounded) { total += 4; max += 5 }
-    const pct = max > 0 ? Math.round((total / max) * 100) : 0
-    return { grade: pct >= 81 ? 'A' : pct >= 61 ? 'B' : pct >= 41 ? 'C' : pct >= 21 ? 'D' : 'E', score: total }
-  }
-
-  const saveGrading = async () => {
-    if (!selected) return
-    const { grade, score } = calculateGrade(gradingForm)
-    await updateCompany(selected.id, {
-      grading_data: gradingForm, lead_grade: grade, lead_score: score,
-      is_hiring: gradingForm.activelyHiring, buyer_intent: gradingForm.buyerIntent,
-      funding_stage: gradingForm.fundingStage, employee_count: gradingForm.companySize,
-      revenue_range: gradingForm.revenueRange, country: gradingForm.geography, founded_year: gradingForm.yearFounded
-    })
-    setSelected(prev => prev ? { ...prev, lead_grade: grade, lead_score: score } : null)
-  }
-
-  const addLabel = async (label: string) => {
-    if (!selected) return
-    const labels = [...(selected.labels || []), label]
-    await updateCompany(selected.id, { labels })
-    setShowLabelPicker(false)
-  }
-
-  const removeLabel = async (label: string) => {
-    if (!selected) return
-    const labels = (selected.labels || []).filter(l => l !== label)
-    await updateCompany(selected.id, { labels })
-  }
-
-  const openCompany = (c: Company) => {
-    setSelected(c)
-    setGradingForm({
-      buyerIntent: c.buyer_intent || c.grading_data?.buyerIntent,
-      activelyHiring: c.is_hiring || c.grading_data?.activelyHiring,
-      fundingStage: c.funding_stage || c.grading_data?.fundingStage,
-      fundingAmount: c.funding_amount || c.grading_data?.fundingAmount,
-      revenueRange: c.revenue_range || c.grading_data?.revenueRange,
-      companySize: c.employee_count || c.grading_data?.companySize,
-      geography: c.country || c.grading_data?.geography,
-      yearFounded: c.founded_year || c.grading_data?.yearFounded
-    })
-    setActiveTab('overview')
-  }
-
-  const goToGenerate = (c: Company, signal?: any) => {
-    let context = c.last_context || ''
-    let sources = ''
-    
-    // If signal provided, use its content as context
-    if (signal) {
-      const signalContent = signal.content || signal.quote || signal.detail || ''
-      context = `Recent news: ${signalContent}`
-      if (signal.publishedDate) context += ` (${signal.publishedDate})`
-      if (signal.url) {
-        context += `\n\nSource: ${signal.url}`
-        sources = signal.url
+  const loadSettingsFromDB = async () => {
+    try {
+      const res = await fetch('/api/settings?userId=default')
+      const data = await res.json()
+      if (data.success && data.settings) {
+        // Merge DB settings with defaults
+        const dbSettings = data.settings
+        const merged = {
+          ...defaultSettings,
+          ...(dbSettings.llm || {}),
+          ...(dbSettings.prompts || {}),
+          ...(dbSettings.company || {}),
+          gradingCriteria: dbSettings.grading || defaultSettings.gradingCriteria,
+          signalSettings: dbSettings.signals || defaultSettings.signalSettings,
+          icp: dbSettings.icp || defaultSettings.icp
+        }
+        return merged
       }
+    } catch (e) {
+      console.log('Could not load settings from DB:', e)
     }
+    return null
+  }
+
+  const resetDefaults = () => {
+    if (confirm('Reset all settings to defaults?')) {
+      setSettings(defaultSettings)
+      localStorage.setItem('llm-settings', JSON.stringify(defaultSettings))
+    }
+  }
+
+  // List management helpers
+  const addItem = (field: keyof Settings, value: string, setter: (v: string) => void) => {
+    if (value.trim()) {
+      setSettings({ ...settings, [field]: [...(settings[field] as string[]), value.trim()] })
+      setter('')
+    }
+  }
+  const removeItem = (field: keyof Settings, index: number) => {
+    setSettings({ ...settings, [field]: (settings[field] as string[]).filter((_, i) => i !== index) })
+  }
+
+  // Calculate max ICP score
+  const calculateICPMaxScore = () => {
+    const icp = settings.icp
+    const industryMax = Math.max(...icp.industries.filter(i => i.enabled).map(i => i.weight), 0)
+    const sizeMax = Math.max(...icp.companySizes.filter(s => s.enabled).map(s => s.weight), 0)
+    const fundingMax = Math.max(...icp.fundingStages.filter(f => f.enabled).map(f => f.weight), 0)
+    const geoMax = Math.max(...icp.geographies.filter(g => g.enabled).map(g => g.weight), 0)
+    const signalsTotal = icp.buyingSignals.filter(s => s.enabled).reduce((sum, s) => sum + s.points, 0)
+    const techTotal = icp.techStack.filter(t => t.enabled).reduce((sum, t) => sum + t.weight, 0)
     
-    const params = new URLSearchParams({
-      company: c.company_name, 
-      industry: c.industry || '', 
-      prospectName: c.last_prospect_name || '',
-      prospectTitle: c.last_prospect_title || '', 
-      context: context, 
-      messageType: signal ? (signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection') : (c.last_message_type || 'LinkedIn Connection')
-    })
-    if (sources) params.set('sources', sources)
-    router.push(`/?${params.toString()}`)
-  }
-
-  const goToGenerateWithSignal = (c: Company, signal: any) => {
-    // Build context from signal content, not just the label
-    const signalContent = signal.content || signal.quote || signal.detail || ''
-    const signalUrl = signal.url || ''
-    const signalSource = signal.source || ''
-    const signalDate = signal.publishedDate || ''
-    
-    // Create rich context with the actual signal information
-    let context = `Recent news: ${signalContent}`
-    if (signalDate) context += ` (${signalDate})`
-    if (signalUrl) context += `\n\nSource: ${signalUrl}`
-    if (signalSource && !signalUrl) context += `\n\nSource: ${signalSource}`
-    
-    const params = new URLSearchParams({
-      company: c.company_name,
-      industry: c.industry || '',
-      prospectName: c.last_prospect_name || '',
-      prospectTitle: c.last_prospect_title || '',
-      context: context,
-      messageType: signal.category === 'funding' || signal.category === 'acquisition' ? 'ABM' : 'LinkedIn Connection',
-      sources: signalUrl || ''
-    })
-    router.push(`/?${params.toString()}`)
-  }
-
-  const getAllLinks = (c: Company) => {
-    const links: any[] = []
-    if (c.research_links_data) c.research_links_data.forEach((l: any) => links.push({ ...l, type: 'Research' }))
-    if (c.last_context) {
-      const urls = c.last_context.match(/https?:\/\/[^\s]+/g) || []
-      urls.forEach(url => { if (!links.find(l => l.url === url)) links.push({ url, source: new URL(url).hostname, type: 'Context' }) })
-    }
-    return links
-  }
-
-  const formatDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A'
-
-  // Helper to get signals from either old array format or new object format
-  const getSignals = (c: Company) => {
-    if (!c.signal_data) return []
-    if (Array.isArray(c.signal_data)) return c.signal_data
-    if (c.signal_data.detected) return c.signal_data.detected
-    return []
-  }
-
-  const getSignalStats = (c: Company) => {
-    if (!c.signal_data || Array.isArray(c.signal_data)) {
-      return { high: 0, medium: 0, low: 0, total: c.signal_count || 0 }
-    }
-    return {
-      high: c.signal_data.high_priority || 0,
-      medium: c.signal_data.medium_priority || 0,
-      low: (c.signal_data.count || 0) - (c.signal_data.high_priority || 0) - (c.signal_data.medium_priority || 0),
-      total: c.signal_data.count || 0
-    }
+    return industryMax + sizeMax + fundingMax + geoMax + signalsTotal + techTotal
   }
 
   return (
     <div className="flex h-screen bg-zinc-950">
       {sidebarOpen && <div className="fixed inset-0 bg-black/60 z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
-      {/* Modal */}
-      {selected && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setSelected(null)}>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-            {/* Modal Header */}
-            <div className="p-4 border-b border-zinc-800">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  {selected.lead_grade ? (
-                    <div className={`w-12 h-12 rounded-xl ${GRADE_COLORS[selected.lead_grade]} flex items-center justify-center text-xl font-bold`}>
-                      {selected.lead_grade}
-                    </div>
-                  ) : (
-                    <div className="w-12 h-12 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-500 text-sm">N/A</div>
-                  )}
-                  <div>
-                    <h2 className="text-lg font-semibold text-white">{selected.company_name}</h2>
-                    <div className="flex items-center gap-2 text-xs text-zinc-500">
-                      {selected.industry && <span>{selected.industry}</span>}
-                      {selected.country && <><span>·</span><span>{selected.country}</span></>}
-                      {selected.lead_score && <><span>·</span><span className="text-yellow-400">{selected.lead_score} pts</span></>}
-                    </div>
-                  </div>
-                </div>
-                <button onClick={() => setSelected(null)} className="p-1 text-zinc-500 hover:text-white">✕</button>
-              </div>
-              
-              {/* Labels */}
-              <div className="flex flex-wrap gap-1 mt-3">
-                {(selected.labels || []).map(l => (
-                  <span key={l} className={`px-2 py-0.5 ${LABEL_COLORS[l] || 'bg-zinc-700'} text-white text-xs rounded-full flex items-center gap-1`}>
-                    {l} <button onClick={() => removeLabel(l)} className="hover:opacity-70">×</button>
-                  </span>
-                ))}
-                <button onClick={() => setShowLabelPicker(!showLabelPicker)} className="px-2 py-0.5 border border-dashed border-zinc-700 text-zinc-500 text-xs rounded-full hover:border-zinc-500">+ Label</button>
-              </div>
-              {showLabelPicker && (
-                <div className="mt-2 p-2 bg-zinc-950 rounded-lg flex flex-wrap gap-1">
-                  {PREDEFINED_LABELS.filter(l => !(selected.labels || []).includes(l)).map(l => (
-                    <button key={l} onClick={() => addLabel(l)} className={`px-2 py-1 ${LABEL_COLORS[l]} text-white text-xs rounded-full`}>{l}</button>
-                  ))}
-                </div>
-              )}
-
-              {/* Tabs */}
-              <div className="flex gap-1 mt-4 bg-zinc-950 p-1 rounded-lg">
-                {(['overview', 'signals', 'grading', 'links'] as const).map(tab => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === tab ? 'bg-yellow-400 text-zinc-900' : 'text-zinc-400 hover:text-white'}`}
-                  >
-                    {tab === 'overview' && 'Overview'}
-                    {tab === 'signals' && `Signals${selected.signal_count ? ` (${selected.signal_count})` : ''}`}
-                    {tab === 'grading' && 'Grading'}
-                    {tab === 'links' && `Links (${getAllLinks(selected).length})`}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {activeTab === 'overview' && (
-                <>
-                  {/* Info Grid */}
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      { label: 'Employees', value: selected.employee_count || selected.extracted_info?.employeeCount },
-                      { label: 'Revenue', value: selected.revenue_range },
-                      { label: 'Funding', value: selected.funding_stage || selected.extracted_info?.lastRound },
-                      { label: 'Amount', value: selected.funding_amount || selected.extracted_info?.lastRoundAmount },
-                      { label: 'Founded', value: selected.founded_year || selected.extracted_info?.founded },
-                      { label: 'Location', value: selected.country || selected.extracted_info?.headquarters },
-                      { label: 'Hiring', value: selected.is_hiring ? 'Yes' : 'No', highlight: selected.is_hiring },
-                      { label: 'Intent', value: selected.buyer_intent ? 'Yes' : 'No', highlight: selected.buyer_intent }
-                    ].map((item, i) => (
-                      <div key={i} className="bg-zinc-950 rounded-lg p-3">
-                        <p className="text-[10px] text-zinc-500 uppercase">{item.label}</p>
-                        <p className={`text-sm font-medium ${item.highlight ? 'text-emerald-400' : 'text-white'}`}>{item.value || 'Unknown'}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Description from extracted_info */}
-                  {selected.extracted_info?.description && (
-                    <div className="bg-zinc-950 rounded-lg p-3">
-                      <p className="text-[10px] text-zinc-500 uppercase mb-2">About</p>
-                      <p className="text-zinc-300 text-sm">{selected.extracted_info.description}</p>
-                    </div>
-                  )}
-
-                  {/* Pain Points & Outreach Angles from extracted_info */}
-                  {((selected.extracted_info?.painPoints && selected.extracted_info.painPoints.length > 0) || (selected.extracted_info?.outreachAngles && selected.extracted_info.outreachAngles.length > 0)) && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {selected.extracted_info?.painPoints && selected.extracted_info.painPoints.length > 0 && (
-                        <div className="bg-zinc-950 rounded-lg p-3">
-                          <p className="text-[10px] text-zinc-500 uppercase mb-2">💢 Pain Points</p>
-                          <div className="flex flex-wrap gap-1">
-                            {selected.extracted_info.painPoints.map((p: string, i: number) => (
-                              <span key={i} className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">{p}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {selected.extracted_info?.outreachAngles && selected.extracted_info.outreachAngles.length > 0 && (
-                        <div className="bg-zinc-950 rounded-lg p-3">
-                          <p className="text-[10px] text-zinc-500 uppercase mb-2">💡 Outreach Angles</p>
-                          <div className="space-y-1">
-                            {selected.extracted_info.outreachAngles.slice(0, 3).map((a: string, i: number) => (
-                              <p key={i} className="text-xs text-yellow-400 border-l-2 border-yellow-400 pl-2">{a}</p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Key People from extracted_info */}
-                  {selected.extracted_info?.keyPeople && selected.extracted_info.keyPeople.length > 0 && (
-                    <div className="bg-zinc-950 rounded-lg p-3">
-                      <p className="text-[10px] text-zinc-500 uppercase mb-2">👥 Key People</p>
-                      <div className="space-y-2">
-                        {selected.extracted_info.keyPeople.slice(0, 3).map((person: { name?: string; title?: string }, i: number) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 text-xs font-bold">
-                              {person.name?.charAt(0) || '?'}
-                            </div>
-                            <div>
-                              <p className="text-white text-sm">{person.name}</p>
-                              <p className="text-zinc-500 text-xs">{person.title}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Contact */}
-                  <div className="bg-zinc-950 rounded-lg p-3">
-                    <p className="text-[10px] text-zinc-500 uppercase mb-2">Contact</p>
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-yellow-400 rounded-full flex items-center justify-center text-zinc-900 font-bold">
-                        {selected.last_prospect_name?.charAt(0) || '?'}
-                      </div>
-                      <div>
-                        <p className="text-white font-medium">{selected.last_prospect_name || 'No contact'}</p>
-                        <p className="text-zinc-500 text-sm">{selected.last_prospect_title || 'No title'}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Context */}
-                  <div className="bg-zinc-950 rounded-lg p-3">
-                    <p className="text-[10px] text-zinc-500 uppercase mb-2">Last Outreach Context</p>
-                    <p className="text-zinc-300 text-sm whitespace-pre-wrap">{selected.last_context || 'No context'}</p>
-                  </div>
-
-                  {/* Notes */}
-                  <div className="bg-zinc-950 rounded-lg p-3">
-                    <p className="text-[10px] text-zinc-500 uppercase mb-2">Notes</p>
-                    <textarea
-                      className="w-full px-2 py-1.5 bg-transparent border border-zinc-800 rounded text-white text-sm resize-none h-20 focus:border-yellow-400"
-                      defaultValue={selected.notes || ''}
-                      onBlur={(e) => updateCompany(selected.id, { notes: e.target.value })}
-                      placeholder="Add notes..."
-                    />
-                  </div>
-                </>
-              )}
-
-              {activeTab === 'signals' && (
-                <>
-                  {/* Signal summary */}
-                  {getSignals(selected).length > 0 && (
-                    <div className="flex items-center gap-2 mb-4 p-3 bg-zinc-950 rounded-lg">
-                      <span className="text-sm text-zinc-400">Detected:</span>
-                      {getSignalStats(selected).high > 0 && (
-                        <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">🔥 {getSignalStats(selected).high} High</span>
-                      )}
-                      {getSignalStats(selected).medium > 0 && (
-                        <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded">⚡ {getSignalStats(selected).medium} Medium</span>
-                      )}
-                      {getSignalStats(selected).low > 0 && (
-                        <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">📌 {getSignalStats(selected).low} Low</span>
-                      )}
-                    </div>
-                  )}
-                  
-                  {getSignals(selected).length > 0 ? (
-                    <div className="space-y-2">
-                      {getSignals(selected).map((s: any, i: number) => (
-                        <div key={i} className={`rounded-lg p-3 border ${
-                          s.priority === 'high' ? 'bg-red-500/10 border-red-500/30' :
-                          s.priority === 'medium' ? 'bg-yellow-500/10 border-yellow-500/30' :
-                          'bg-zinc-950 border-zinc-800'
-                        }`}>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm">{s.label || s.type}</span>
-                            {s.priority && (
-                              <span className={`px-1.5 py-0.5 text-[10px] rounded ${
-                                s.priority === 'high' ? 'bg-red-500/30 text-red-400' :
-                                s.priority === 'medium' ? 'bg-yellow-500/30 text-yellow-400' :
-                                'bg-blue-500/30 text-blue-400'
-                              }`}>
-                                {s.priority}
-                              </span>
-                            )}
-                            <div className="ml-auto flex items-center gap-2">
-                              {s.publishedDate && <span className="text-xs text-zinc-500">{formatDate(s.publishedDate)}</span>}
-                              <button 
-                                onClick={() => goToGenerateWithSignal(selected, s)}
-                                className="px-2 py-1 bg-yellow-400/20 text-yellow-400 rounded text-xs hover:bg-yellow-400/30"
-                              >
-                                ✉️ Use
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-white text-sm font-medium">{s.detail || s.title}</p>
-                          {s.content && <p className="text-zinc-400 text-xs mt-1 line-clamp-2">{s.content}</p>}
-                          {s.url && <a href={s.url} target="_blank" className="text-yellow-400 text-xs mt-2 inline-block hover:underline">{s.source} →</a>}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12 text-zinc-600">
-                      <span className="text-3xl block mb-2">🔔</span>
-                      <p>No signals yet</p>
-                      <p className="text-xs mt-1">Click &quot;Scan Signals&quot; to search</p>
-                    </div>
-                  )}
-
-                  {/* Debug Panel */}
-                  {signalDebug && (
-                    <div className="mt-4 p-3 bg-zinc-950 border border-zinc-800 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-medium text-zinc-500">SCAN DEBUG</span>
-                        <button onClick={() => setSignalDebug(null)} className="text-xs text-zinc-600 hover:text-white">✕</button>
-                      </div>
-                      
-                      {/* Stats */}
-                      {signalDebug.stats && (
-                        <div className="grid grid-cols-5 gap-2 mb-3">
-                          <div className="text-center p-2 bg-zinc-900 rounded">
-                            <p className="text-lg font-bold text-white">{signalDebug.stats.sourcesSearched || signalDebug.stats.queriesRun || 0}</p>
-                            <p className="text-[10px] text-zinc-500">Searches</p>
-                          </div>
-                          <div className="text-center p-2 bg-zinc-900 rounded">
-                            <p className="text-lg font-bold text-white">{signalDebug.stats.sourcesFound || signalDebug.stats.rawResults || 0}</p>
-                            <p className="text-[10px] text-zinc-500">Sources</p>
-                          </div>
-                          <div className="text-center p-2 bg-zinc-900 rounded">
-                            <p className="text-lg font-bold text-emerald-400">{signalDebug.stats.signalsExtracted || 0}</p>
-                            <p className="text-[10px] text-zinc-500">Signals</p>
-                          </div>
-                          <div className="text-center p-2 bg-zinc-900 rounded">
-                            <p className="text-lg font-bold text-blue-400">{signalDebug.stats.peopleFound || 0}</p>
-                            <p className="text-[10px] text-zinc-500">People</p>
-                          </div>
-                          <div className="text-center p-2 bg-zinc-900 rounded">
-                            <p className={`text-lg font-bold ${(signalDebug.stats.icpScore || 0) >= 70 ? 'text-emerald-400' : (signalDebug.stats.icpScore || 0) >= 50 ? 'text-yellow-400' : 'text-zinc-400'}`}>
-                              {signalDebug.stats.icpScore || '-'}
-                            </p>
-                            <p className="text-[10px] text-zinc-500">ICP Fit</p>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Research insights */}
-                      {signalDebug.research && (
-                        <div className="space-y-2 mb-3">
-                          {signalDebug.research.companyInfo?.description && (
-                            <div className="p-2 bg-zinc-900 rounded">
-                              <p className="text-[10px] text-zinc-500 mb-1">ABOUT</p>
-                              <p className="text-xs text-zinc-300">{signalDebug.research.companyInfo.description}</p>
-                            </div>
-                          )}
-                          {signalDebug.research.painPoints?.length > 0 && (
-                            <div className="p-2 bg-emerald-950/30 border border-emerald-900/50 rounded">
-                              <p className="text-[10px] text-emerald-400 mb-1">PAIN POINTS</p>
-                              <div className="flex flex-wrap gap-1">
-                                {signalDebug.research.painPoints.slice(0, 4).map((p: string, i: number) => (
-                                  <span key={i} className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] rounded">{p}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {signalDebug.research.outreachAngles?.length > 0 && (
-                            <div className="p-2 bg-yellow-950/30 border border-yellow-900/50 rounded">
-                              <p className="text-[10px] text-yellow-400 mb-1">OUTREACH ANGLES</p>
-                              <div className="space-y-1">
-                                {signalDebug.research.outreachAngles.slice(0, 3).map((a: string, i: number) => (
-                                  <p key={i} className="text-xs text-yellow-300">• {a}</p>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {signalDebug.research.keyPeople?.length > 0 && (
-                            <div className="p-2 bg-blue-950/30 border border-blue-900/50 rounded">
-                              <p className="text-[10px] text-blue-400 mb-1">KEY PEOPLE</p>
-                              <div className="space-y-1">
-                                {signalDebug.research.keyPeople.slice(0, 3).map((p: any, i: number) => (
-                                  <p key={i} className="text-xs text-blue-300">{p.name} - {p.title}</p>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Errors */}
-                      {signalDebug.errors?.length > 0 && (
-                        <div className="mb-3 p-2 bg-red-500/10 border border-red-500/30 rounded">
-                          <p className="text-xs text-red-400 font-medium mb-1">Errors:</p>
-                          {signalDebug.errors.map((e: string, i: number) => (
-                            <p key={i} className="text-xs text-red-300">{e}</p>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Progress steps */}
-                      {signalDebug.progress?.length > 0 && (
-                        <div>
-                          <p className="text-xs text-zinc-500 mb-1">Progress:</p>
-                          <div className="space-y-0.5">
-                            {signalDebug.progress.map((p: string, i: number) => (
-                              <p key={i} className="text-[10px] text-zinc-400">✓ {p}</p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {activeTab === 'grading' && (
-                <GradingTab 
-                  selected={selected} 
-                  gradingForm={gradingForm} 
-                  setGradingForm={setGradingForm}
-                  saveGrading={saveGrading}
-                />
-              )}
-
-              {activeTab === 'links' && (
-                getAllLinks(selected).length ? (
-                  <div className="space-y-2">
-                    {getAllLinks(selected).map((link, i) => (
-                      <a key={i} href={link.url} target="_blank" className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg hover:bg-zinc-900 transition-colors">
-                        <span className="text-yellow-400">🔗</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white text-sm">{link.source}</p>
-                          <p className="text-zinc-600 text-xs truncate">{link.url}</p>
-                        </div>
-                        <span className="text-zinc-500 text-xs">{link.type}</span>
-                      </a>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 text-zinc-600">
-                    <span className="text-3xl block mb-2">🔗</span>
-                    <p>No links stored</p>
-                  </div>
-                )
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-zinc-800 flex gap-2">
-              <button onClick={() => refreshCompany(selected.id, selected.company_name, selected.industry)} disabled={refreshing === selected.id} className="px-4 py-2 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg text-sm hover:bg-purple-500/30 disabled:opacity-50">
-                {refreshing === selected.id ? '⏳ Researching...' : '🔬 Deep Research'}
-              </button>
-              <button onClick={() => { setSelected(null); goToGenerate(selected) }} className="flex-1 px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold hover:bg-yellow-300">
-                ✉️ Generate Message
-              </button>
-              {selected.is_archived ? (
-                <button onClick={() => unarchiveCompany(selected.id)} className="px-4 py-2 bg-amber-500/20 text-amber-400 rounded-lg text-sm hover:bg-amber-500/30">
-                  📤 Unarchive
-                </button>
-              ) : (
-                <button onClick={() => archiveCompany(selected.id)} className="px-4 py-2 bg-zinc-800 text-zinc-400 rounded-lg text-sm hover:bg-zinc-700">
-                  📁 Archive
-                </button>
-              )}
-              <button onClick={() => deleteCompany(selected.id)} className="px-4 py-2 bg-red-500/20 text-red-400 rounded-lg text-sm hover:bg-red-500/30">
-                🗑️
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Sidebar */}
       <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-56 bg-zinc-900 border-r border-zinc-800 z-30 h-full flex flex-col transition-transform`}>
         <div className="p-4 border-b border-zinc-800">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center">
-              <span className="text-zinc-900 font-black text-sm">TS</span>
-            </div>
-            <div>
-              <h2 className="font-bold text-white text-sm">Tech-stack.io</h2>
-              <p className="text-[10px] text-zinc-500">Outreach Engine</p>
-            </div>
+            <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center"><span className="text-zinc-900 font-black text-sm">TS</span></div>
+            <div><h2 className="font-bold text-white text-sm">Tech-stack.io</h2><p className="text-[10px] text-zinc-500">Outreach Engine</p></div>
           </div>
         </div>
-        
         <nav className="flex-1 p-3 space-y-1">
-          <Link href="/" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>✨</span> Generate
-          </Link>
-          <Link href="/bulk" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>📦</span> Bulk
-          </Link>
-          <Link href="/campaigns" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>🎯</span> Campaigns
-          </Link>
-          <Link href="/prospect" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>🔍</span> Prospect
-          </Link>
-          <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">
-            <span>💾</span> Saved
-            <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-yellow-400/20 rounded">{companies.length}</span>
-          </button>
-          <Link href="/history" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>📊</span> History
-          </Link>
-          <Link href="/settings" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>⚙️</span> Settings
-          </Link>
+          <Link href="/" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">✨ Generate</Link>
+          <Link href="/bulk" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">📦 Bulk</Link>
+          <Link href="/saved" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">💾 Saved</Link>
+          <Link href="/history" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">📊 History</Link>
+          <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">⚙️ Settings</button>
         </nav>
       </aside>
 
       {/* Main */}
       <main className="flex-1 overflow-auto">
         <header className="bg-zinc-900/80 backdrop-blur border-b border-zinc-800 px-4 lg:px-6 py-3 sticky top-0 z-10">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1.5 text-zinc-400 hover:text-white">☰</button>
-              <h1 className="text-lg font-semibold text-white">Saved Companies</h1>
-              <span className="text-xs text-zinc-500">{filtered.length} of {companies.length}</span>
+              <h1 className="text-lg font-semibold text-white">LLM Settings</h1>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowArchived(!showArchived)}
-                className={`px-3 py-1.5 rounded-lg text-sm ${showArchived ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
-              >
-                📁 {showArchived ? 'Archived' : 'Archive'}
+              <button onClick={resetDefaults} className="px-3 py-1.5 text-zinc-400 hover:text-white text-sm">Reset</button>
+              <button onClick={saveSettings} className={`px-4 py-1.5 rounded-lg text-sm font-medium ${saved ? 'bg-emerald-500 text-white' : 'bg-yellow-400 text-zinc-900 hover:bg-yellow-300'}`}>
+                {saved ? '✓ Saved!' : 'Save Settings'}
               </button>
-              {companies.length > 0 && !showArchived && (
-                <button 
-                  onClick={researchAllCompanies} 
-                  disabled={researchingAll}
-                  className="px-3 py-1.5 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-lg text-sm hover:bg-blue-500/30 disabled:opacity-50"
-                >
-                  {researchingAll ? `🔄 ${researchProgress.current}/${researchProgress.total}` : '🔍 Research All'}
-                </button>
-              )}
-              {companies.length > 0 && !showArchived && icpSettings && (
-                <button 
-                  onClick={rescoreAllCompanies} 
-                  disabled={scoringAll}
-                  className="px-3 py-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-sm hover:bg-emerald-500/30 disabled:opacity-50"
-                >
-                  {scoringAll ? '🔄 Scoring...' : '🎯 Re-score ICP'}
-                </button>
-              )}
-              <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
-                <option value="">All Grades</option>
-                {['A','B','C','D','E'].map(g => <option key={g} value={g}>Grade {g}</option>)}
-              </select>
-              {icpSettings && (
-                <select value={filterICP} onChange={e => setFilterICP(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
-                  <option value="">All ICP</option>
-                  <option value="high">🟢 High Fit</option>
-                  <option value="medium">🟡 Medium Fit</option>
-                  <option value="low">🔴 Low Fit</option>
-                </select>
-              )}
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
-                <option value="grade_desc">Best Grade</option>
-                <option value="icp_desc">Best ICP Fit</option>
-                <option value="signals_desc">Most Signals</option>
-                <option value="name_asc">A-Z</option>
-                <option value="recent">Recent</option>
-              </select>
             </div>
           </div>
-          <input
-            type="text"
-            placeholder="Search companies..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="mt-3 w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm placeholder-zinc-600 focus:border-yellow-400"
-          />
         </header>
 
-        <div className="p-4 lg:p-6">
-          {loading ? (
-            <div className="flex justify-center py-12">
-              <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="text-center py-16">
-              <span className="text-4xl block mb-3">💾</span>
-              <p className="text-white font-medium">No companies saved</p>
-              <p className="text-zinc-500 text-sm mt-1">Save companies from the Generate page</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {filtered.map(c => (
-                <div
-                  key={c.id}
-                  onClick={() => openCompany(c)}
-                  className={`bg-zinc-900 border rounded-xl p-4 cursor-pointer hover:border-zinc-700 transition-all ${c.has_new_signals ? 'border-emerald-500/50' : 'border-zinc-800'}`}
-                >
-                  <div className="flex items-start gap-3 mb-3">
-                    {c.lead_grade ? (
-                      <div className={`w-10 h-10 rounded-lg ${GRADE_COLORS[c.lead_grade]} flex items-center justify-center font-bold text-lg flex-shrink-0`}>
-                        {c.lead_grade}
-                      </div>
-                    ) : (
-                      <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-500 text-xs flex-shrink-0">N/A</div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-white font-medium truncate">{c.company_name}</h3>
-                        {c.has_new_signals && <span className="w-2 h-2 bg-emerald-500 rounded-full flex-shrink-0"></span>}
-                      </div>
-                      <p className="text-zinc-500 text-sm truncate">{c.last_prospect_name}</p>
-                    </div>
-                    {/* ICP Score Badge */}
-                    {(c.icp_score !== undefined || icpSettings) && (() => {
-                      // Prefer database score, fall back to calculated
-                      const score = c.icp_score ?? (icpSettings ? calculateICPScore(c).score : 0)
-                      const fit = c.icp_fit ?? (score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low')
-                      const fitColors = {
-                        high: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-                        medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-                        low: 'bg-zinc-700/50 text-zinc-400 border-zinc-600'
-                      }
-                      return (
-                        <div className={`px-2 py-1 rounded border text-xs font-medium flex-shrink-0 ${fitColors[fit as 'high' | 'medium' | 'low']}`}>
-                          {score}%
-                        </div>
-                      )
-                    })()}
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {c.industry && <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs rounded">{c.industry}</span>}
-                    {c.country && <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs rounded">{c.country}</span>}
-                    {c.funding_stage && <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs rounded">{c.funding_stage}</span>}
-                    {getSignalStats(c).high > 0 && <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">🔥 {getSignalStats(c).high}</span>}
-                    {getSignalStats(c).total > 0 && getSignalStats(c).high === 0 && <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">📊 {getSignalStats(c).total}</span>}
-                  </div>
+        {/* Tabs */}
+        <div className="border-b border-zinc-800 px-4 lg:px-6 overflow-x-auto">
+          <div className="flex gap-1">
+            {[
+              { id: 'model', label: '🤖 Model' },
+              { id: 'prompts', label: '📝 Prompts' },
+              { id: 'company', label: '🏢 Company' },
+              { id: 'examples', label: '💡 Examples' },
+              { id: 'grading', label: '📊 Grading' },
+              { id: 'signals', label: '🔔 Signals' },
+              { id: 'icp', label: '🎯 ICP' },
+              { id: 'integrations', label: '🔗 Integrations' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'text-yellow-400 border-yellow-400' : 'text-zinc-500 border-transparent hover:text-white'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-                  {c.labels && c.labels.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-3">
-                      {c.labels.slice(0, 2).map(l => <span key={l} className={`px-2 py-0.5 ${LABEL_COLORS[l] || 'bg-zinc-700'} text-white text-xs rounded-full`}>{l}</span>)}
-                      {c.labels.length > 2 && <span className="px-2 py-0.5 bg-zinc-700 text-white text-xs rounded-full">+{c.labels.length - 2}</span>}
-                    </div>
-                  )}
-
-                  <div className="text-xs text-zinc-600 pt-2 border-t border-zinc-800 flex justify-between">
-                    <span>{formatDate(c.created_at)}</span>
-                    <span>{c.lead_score ? `${c.lead_score} pts` : ''}</span>
+        <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-6">
+          {/* Model Tab */}
+          {activeTab === 'model' && (
+            <>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Model Selection</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Local Model (Ollama)</label>
+                    <select value={settings.localModel} onChange={e => setSettings({...settings, localModel: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm">
+                      <option value="llama3.2">llama3.2</option>
+                      <option value="llama3.1:8b">llama3.1:8b</option>
+                      <option value="llama3.1:70b">llama3.1:70b</option>
+                      <option value="mistral">mistral</option>
+                      <option value="mixtral">mixtral</option>
+                      <option value="techstack-outreach">techstack-outreach (Custom)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Ollama Endpoint</label>
+                    <input 
+                      type="text" 
+                      value={settings.localEndpoint} 
+                      onChange={e => setSettings({...settings, localEndpoint: e.target.value})} 
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      placeholder="http://localhost:11434"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Cloud Model (Groq)</label>
+                    <select value={settings.cloudModel} onChange={e => setSettings({...settings, cloudModel: e.target.value})} className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm">
+                      <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+                      <option value="llama-3.1-70b-versatile">llama-3.1-70b-versatile</option>
+                      <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+                      <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
+                    </select>
                   </div>
                 </div>
-              ))}
-            </div>
+                <p className="text-[10px] text-zinc-600 mt-3">Run `ollama list` to see available models. Make sure Ollama is running.</p>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Generation Parameters</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-2">Temperature: {settings.temperature}</label>
+                    <input type="range" min="0" max="1" step="0.1" value={settings.temperature} onChange={e => setSettings({...settings, temperature: parseFloat(e.target.value)})} className="w-full accent-yellow-400" />
+                    <div className="flex justify-between text-[10px] text-zinc-600"><span>Focused</span><span>Creative</span></div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-2">Top P: {settings.topP}</label>
+                    <input type="range" min="0" max="1" step="0.1" value={settings.topP} onChange={e => setSettings({...settings, topP: parseFloat(e.target.value)})} className="w-full accent-yellow-400" />
+                    <div className="flex justify-between text-[10px] text-zinc-600"><span>Narrow</span><span>Diverse</span></div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-2">Max Tokens: {settings.maxTokens}</label>
+                    <input type="range" min="100" max="2000" step="100" value={settings.maxTokens} onChange={e => setSettings({...settings, maxTokens: parseInt(e.target.value)})} className="w-full accent-yellow-400" />
+                    <div className="flex justify-between text-[10px] text-zinc-600"><span>Short</span><span>Long</span></div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-2">Frequency Penalty: {settings.frequencyPenalty}</label>
+                    <input type="range" min="0" max="1" step="0.1" value={settings.frequencyPenalty} onChange={e => setSettings({...settings, frequencyPenalty: parseFloat(e.target.value)})} className="w-full accent-yellow-400" />
+                    <div className="flex justify-between text-[10px] text-zinc-600"><span>Allow Repetition</span><span>Avoid</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Quick Presets</h3>
+                <div className="grid grid-cols-4 gap-3">
+                  {[
+                    { label: '🎯 Precise', temp: 0.3, topP: 0.8 },
+                    { label: '⚖️ Balanced', temp: 0.7, topP: 0.9 },
+                    { label: '🎨 Creative', temp: 0.9, topP: 0.95 },
+                    { label: '✍️ Unique', temp: 0.5, topP: 0.85 }
+                  ].map(preset => (
+                    <button key={preset.label} onClick={() => setSettings({...settings, temperature: preset.temp, topP: preset.topP})} className="p-3 bg-zinc-950 hover:bg-zinc-800 rounded-lg text-center transition-colors">
+                      <div className="text-lg mb-1">{preset.label.split(' ')[0]}</div>
+                      <div className="text-white text-xs font-medium">{preset.label.split(' ')[1]}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Prompts Tab */}
+          {activeTab === 'prompts' && (
+            <>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Base System Prompt</h3>
+                <textarea
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm h-24 resize-none font-mono"
+                  value={settings.systemPromptBase}
+                  onChange={e => setSettings({...settings, systemPromptBase: e.target.value})}
+                />
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Banned Phrases</h3>
+                <p className="text-xs text-zinc-500 mb-3">AI will never use these phrases</p>
+                <div className="flex gap-2 mb-3">
+                  <input type="text" value={newPhrase} onChange={e => setNewPhrase(e.target.value)} onKeyDown={e => e.key === 'Enter' && addItem('bannedPhrases', newPhrase, setNewPhrase)} className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" placeholder="Add phrase..." />
+                  <button onClick={() => addItem('bannedPhrases', newPhrase, setNewPhrase)} className="px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-medium">Add</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {settings.bannedPhrases.map((phrase, i) => (
+                    <span key={i} className="px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded flex items-center gap-1">
+                      {phrase} <button onClick={() => removeItem('bannedPhrases', i)} className="hover:text-white">×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Good Openers</h3>
+                <p className="text-xs text-zinc-500 mb-3">Example patterns for AI to emulate</p>
+                <div className="flex gap-2 mb-3">
+                  <input type="text" value={newOpener} onChange={e => setNewOpener(e.target.value)} onKeyDown={e => e.key === 'Enter' && addItem('goodOpeners', newOpener, setNewOpener)} className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" placeholder="Add opener..." />
+                  <button onClick={() => addItem('goodOpeners', newOpener, setNewOpener)} className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-medium">Add</button>
+                </div>
+                <div className="space-y-2">
+                  {settings.goodOpeners.map((opener, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-sm">
+                      <span>{opener}</span>
+                      <button onClick={() => removeItem('goodOpeners', i)} className="hover:text-white">×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Company Tab */}
+          {activeTab === 'company' && (
+            <>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Company Description</h3>
+                <textarea
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm h-24 resize-none"
+                  value={settings.companyDescription}
+                  onChange={e => setSettings({...settings, companyDescription: e.target.value})}
+                />
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Services Offered</h3>
+                <div className="flex gap-2 mb-3">
+                  <input type="text" value={newService} onChange={e => setNewService(e.target.value)} onKeyDown={e => e.key === 'Enter' && addItem('services', newService, setNewService)} className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" placeholder="Add service..." />
+                  <button onClick={() => addItem('services', newService, setNewService)} className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium">Add</button>
+                </div>
+                <div className="space-y-2">
+                  {settings.services.map((service, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-2 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-lg text-sm">
+                      <span>{service}</span>
+                      <button onClick={() => removeItem('services', i)} className="hover:text-white">×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Ideal Customer Signals</h3>
+                <p className="text-xs text-zinc-500 mb-3">Triggers that indicate a good prospect</p>
+                <div className="flex gap-2 mb-3">
+                  <input type="text" value={newSignal} onChange={e => setNewSignal(e.target.value)} onKeyDown={e => e.key === 'Enter' && addItem('idealCustomerSignals', newSignal, setNewSignal)} className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" placeholder="Add signal..." />
+                  <button onClick={() => addItem('idealCustomerSignals', newSignal, setNewSignal)} className="px-4 py-2 bg-purple-500 text-white rounded-lg text-sm font-medium">Add</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {settings.idealCustomerSignals.map((signal, i) => (
+                    <span key={i} className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded flex items-center gap-1">
+                      {signal} <button onClick={() => removeItem('idealCustomerSignals', i)} className="hover:text-white">×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Examples Tab */}
+          {activeTab === 'examples' && (
+            <>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">ABM Message Examples</h3>
+                <p className="text-xs text-zinc-500 mb-3">Soft-touch recognition messages. Use {'{name}'}, {'{company}'} as placeholders.</p>
+                <div className="flex gap-2 mb-3">
+                  <input type="text" value={newAbm} onChange={e => setNewAbm(e.target.value)} onKeyDown={e => e.key === 'Enter' && addItem('abmExamples', newAbm, setNewAbm)} className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" placeholder="Add ABM example..." />
+                  <button onClick={() => addItem('abmExamples', newAbm, setNewAbm)} className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium">Add</button>
+                </div>
+                <div className="space-y-2">
+                  {settings.abmExamples.map((example, i) => (
+                    <div key={i} className="flex items-start gap-2 p-3 bg-yellow-400/10 border border-yellow-400/20 rounded-lg">
+                      <span className="flex-1 text-yellow-200 text-sm">{example}</span>
+                      <button onClick={() => removeItem('abmExamples', i)} className="text-yellow-400 hover:text-white">×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Good Message Examples</h3>
+                <div className="space-y-3">
+                  {[
+                    { type: 'POST-FUNDING', msg: 'Saw the Series B news - congrats! Scaling infrastructure while shipping fast is brutal at this stage. How\'s your platform team handling the growth?', score: 95 },
+                    { type: 'ACQUISITION', msg: 'The DataCorp acquisition is interesting - lots of potential synergies on the data pipeline side. Curious how you\'re approaching the platform consolidation timeline?', score: 92 },
+                    { type: 'HIRING', msg: 'That Staff DevOps role has been open a while - brutal market right now. Some teams are bridging with contract engineers while they search. Is that something you\'ve considered?', score: 90 }
+                  ].map((ex, i) => (
+                    <div key={i} className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                      <div className="text-[10px] text-emerald-400 font-semibold mb-1">{ex.type}</div>
+                      <p className="text-white text-sm mb-1">"{ex.msg}"</p>
+                      <div className="text-[10px] text-zinc-500">Score: {ex.score}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Bad Message Examples</h3>
+                <div className="space-y-3">
+                  {[
+                    { msg: 'Hi, I hope this email finds you well. I wanted to reach out because I came across your profile...', reason: 'Generic opener, No personalization, Starts with I' },
+                    { msg: 'We at Tech-stack.io help companies like yours optimize their DevOps processes. Would you be open to a 15-minute call?', reason: 'Leads with company, Asks for call too early' },
+                    { msg: 'I noticed you\'re hiring DevOps engineers. We have a great team that could help. Let me know if you\'d like to discuss.', reason: 'Weak observation, Generic CTA' }
+                  ].map((ex, i) => (
+                    <div key={i} className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                      <p className="text-zinc-500 text-sm line-through mb-1">"{ex.msg}"</p>
+                      <div className="text-[10px] text-red-400">❌ {ex.reason}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl p-4">
+                <h4 className="text-yellow-400 font-medium text-sm mb-2">💡 ABM Tips</h4>
+                <ul className="text-zinc-400 text-sm space-y-1">
+                  <li>• Recognition only, no sales pitch</li>
+                  <li>• Reference specific achievements</li>
+                  <li>• Keep it short (1-2 sentences)</li>
+                  <li>• End with warm closing, not a question</li>
+                </ul>
+              </div>
+            </>
+          )}
+
+          {/* Grading Tab */}
+          {activeTab === 'grading' && (
+            <>
+              <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl p-4 mb-6">
+                <h4 className="text-yellow-400 font-medium text-sm mb-2">📊 Lead Grading System</h4>
+                <p className="text-zinc-400 text-sm">Configure criteria and weights for automatic lead scoring. Total weight should equal 100 for accurate grading (A: 80+, B: 60-79, C: 40-59, D: 20-39, E: 0-19).</p>
+              </div>
+
+              {/* Priority Criteria */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">🔴 Priority Criteria</h3>
+                    <p className="text-xs text-zinc-500">High-impact signals (recommended 15-20 pts each)</p>
+                  </div>
+                  <button
+                    onClick={() => setSettings({
+                      ...settings,
+                      gradingCriteria: {
+                        ...settings.gradingCriteria,
+                        priority: [...settings.gradingCriteria.priority, { name: 'New Criteria', weight: 15 }]
+                      }
+                    })}
+                    className="px-3 py-1 bg-red-500/20 text-red-400 rounded-lg text-xs hover:bg-red-500/30"
+                  >
+                    + Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {settings.gradingCriteria.priority.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.priority]
+                          updated[i] = { ...item, name: e.target.value }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, priority: updated } })
+                        }}
+                        className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      />
+                      <input
+                        type="number"
+                        value={item.weight}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.priority]
+                          updated[i] = { ...item, weight: parseInt(e.target.value) || 0 }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, priority: updated } })
+                        }}
+                        className="w-16 px-2 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm text-center"
+                      />
+                      <span className="text-zinc-500 text-xs w-6">pts</span>
+                      <button
+                        onClick={() => {
+                          const updated = settings.gradingCriteria.priority.filter((_, idx) => idx !== i)
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, priority: updated } })
+                        }}
+                        className="text-zinc-500 hover:text-red-400"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Important Criteria */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">🟡 Important Criteria</h3>
+                    <p className="text-xs text-zinc-500">Medium-impact signals (recommended 10 pts each)</p>
+                  </div>
+                  <button
+                    onClick={() => setSettings({
+                      ...settings,
+                      gradingCriteria: {
+                        ...settings.gradingCriteria,
+                        important: [...settings.gradingCriteria.important, { name: 'New Criteria', weight: 10 }]
+                      }
+                    })}
+                    className="px-3 py-1 bg-yellow-500/20 text-yellow-400 rounded-lg text-xs hover:bg-yellow-500/30"
+                  >
+                    + Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {settings.gradingCriteria.important.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.important]
+                          updated[i] = { ...item, name: e.target.value }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, important: updated } })
+                        }}
+                        className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      />
+                      <input
+                        type="number"
+                        value={item.weight}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.important]
+                          updated[i] = { ...item, weight: parseInt(e.target.value) || 0 }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, important: updated } })
+                        }}
+                        className="w-16 px-2 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm text-center"
+                      />
+                      <span className="text-zinc-500 text-xs w-6">pts</span>
+                      <button
+                        onClick={() => {
+                          const updated = settings.gradingCriteria.important.filter((_, idx) => idx !== i)
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, important: updated } })
+                        }}
+                        className="text-zinc-500 hover:text-red-400"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bonus Criteria */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">🟢 Bonus Criteria</h3>
+                    <p className="text-xs text-zinc-500">Nice-to-have signals (recommended 5 pts each)</p>
+                  </div>
+                  <button
+                    onClick={() => setSettings({
+                      ...settings,
+                      gradingCriteria: {
+                        ...settings.gradingCriteria,
+                        bonus: [...settings.gradingCriteria.bonus, { name: 'New Criteria', weight: 5 }]
+                      }
+                    })}
+                    className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs hover:bg-emerald-500/30"
+                  >
+                    + Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {settings.gradingCriteria.bonus.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.bonus]
+                          updated[i] = { ...item, name: e.target.value }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, bonus: updated } })
+                        }}
+                        className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      />
+                      <input
+                        type="number"
+                        value={item.weight}
+                        onChange={e => {
+                          const updated = [...settings.gradingCriteria.bonus]
+                          updated[i] = { ...item, weight: parseInt(e.target.value) || 0 }
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, bonus: updated } })
+                        }}
+                        className="w-16 px-2 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm text-center"
+                      />
+                      <span className="text-zinc-500 text-xs w-6">pts</span>
+                      <button
+                        onClick={() => {
+                          const updated = settings.gradingCriteria.bonus.filter((_, idx) => idx !== i)
+                          setSettings({ ...settings, gradingCriteria: { ...settings.gradingCriteria, bonus: updated } })
+                        }}
+                        className="text-zinc-500 hover:text-red-400"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Total Weight */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-zinc-400">Total Weight</span>
+                  {(() => {
+                    const total = 
+                      settings.gradingCriteria.priority.reduce((a, b) => a + b.weight, 0) +
+                      settings.gradingCriteria.important.reduce((a, b) => a + b.weight, 0) +
+                      settings.gradingCriteria.bonus.reduce((a, b) => a + b.weight, 0)
+                    return (
+                      <span className={`text-lg font-bold ${total === 100 ? 'text-emerald-400' : total > 100 ? 'text-red-400' : 'text-yellow-400'}`}>
+                        {total}/100
+                      </span>
+                    )
+                  })()}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Signals Tab */}
+          {activeTab === 'signals' && (
+            <>
+              {/* Timeframe Setting */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Signal Timeframe</h3>
+                <p className="text-zinc-500 text-sm mb-4">Only show signals from news and events within this timeframe.</p>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <label className="text-xs text-zinc-500 block mb-1">Days to look back</label>
+                    <input 
+                      type="number" 
+                      min="7" 
+                      max="365"
+                      value={settings.signalSettings?.timeframeDays || 90}
+                      onChange={e => setSettings({
+                        ...settings,
+                        signalSettings: {
+                          ...settings.signalSettings,
+                          timeframeDays: parseInt(e.target.value) || 90
+                        }
+                      })}
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    {[30, 60, 90, 180].map(days => (
+                      <button
+                        key={days}
+                        onClick={() => setSettings({
+                          ...settings,
+                          signalSettings: { ...settings.signalSettings, timeframeDays: days }
+                        })}
+                        className={`px-3 py-2 rounded-lg text-sm ${
+                          settings.signalSettings?.timeframeDays === days 
+                            ? 'bg-yellow-400 text-zinc-900' 
+                            : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {days}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Signal Types */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Signal Types</h3>
+                <p className="text-zinc-500 text-sm mb-4">Enable or disable signal categories and adjust their priority.</p>
+                
+                <div className="space-y-3">
+                  {(settings.signalSettings?.signalPatterns || []).map((signal, idx) => (
+                    <div key={signal.category} className={`p-4 rounded-lg border ${signal.enabled ? 'bg-zinc-950 border-zinc-700' : 'bg-zinc-950/50 border-zinc-800 opacity-60'}`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl">{signal.icon}</span>
+                          <div>
+                            <h4 className="text-white font-medium">{signal.label}</h4>
+                            <p className="text-zinc-500 text-xs">{signal.category}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <select
+                            value={signal.priority}
+                            onChange={e => {
+                              const updated = [...settings.signalSettings.signalPatterns]
+                              updated[idx] = { ...updated[idx], priority: e.target.value as 'high' | 'medium' | 'low' }
+                              setSettings({ ...settings, signalSettings: { ...settings.signalSettings, signalPatterns: updated } })
+                            }}
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              signal.priority === 'high' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                              signal.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                              'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                            } border`}
+                          >
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                          </select>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={signal.enabled}
+                              onChange={e => {
+                                const updated = [...settings.signalSettings.signalPatterns]
+                                updated[idx] = { ...updated[idx], enabled: e.target.checked }
+                                setSettings({ ...settings, signalSettings: { ...settings.signalSettings, signalPatterns: updated } })
+                              }}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-400"></div>
+                          </label>
+                        </div>
+                      </div>
+                      
+                      {/* Keywords */}
+                      <div>
+                        <label className="text-xs text-zinc-500 block mb-2">Keywords (comma-separated)</label>
+                        <input
+                          type="text"
+                          value={signal.keywords.join(', ')}
+                          onChange={e => {
+                            const updated = [...settings.signalSettings.signalPatterns]
+                            updated[idx] = { ...updated[idx], keywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean) }
+                            setSettings({ ...settings, signalSettings: { ...settings.signalSettings, signalPatterns: updated } })
+                          }}
+                          className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm"
+                          placeholder="keyword1, keyword2, keyword3"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Add Custom Signal */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Add Custom Signal</h3>
+                <div className="grid grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Category</label>
+                    <input type="text" id="newSignalCategory" placeholder="custom_signal" className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Label</label>
+                    <input type="text" id="newSignalLabel" placeholder="Custom Signal" className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Icon</label>
+                    <input type="text" id="newSignalIcon" placeholder="🔔" className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">&nbsp;</label>
+                    <button
+                      onClick={() => {
+                        const category = (document.getElementById('newSignalCategory') as HTMLInputElement).value.trim().toLowerCase().replace(/\s+/g, '_')
+                        const label = (document.getElementById('newSignalLabel') as HTMLInputElement).value.trim()
+                        const icon = (document.getElementById('newSignalIcon') as HTMLInputElement).value.trim() || '🔔'
+                        if (category && label) {
+                          const newSignal = { category, label, icon, priority: 'medium' as const, keywords: [], enabled: true }
+                          setSettings({
+                            ...settings,
+                            signalSettings: {
+                              ...settings.signalSettings,
+                              signalPatterns: [...settings.signalSettings.signalPatterns, newSignal]
+                            }
+                          })
+                          ;(document.getElementById('newSignalCategory') as HTMLInputElement).value = ''
+                          ;(document.getElementById('newSignalLabel') as HTMLInputElement).value = ''
+                          ;(document.getElementById('newSignalIcon') as HTMLInputElement).value = ''
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium hover:bg-yellow-300"
+                    >
+                      + Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Signal Priority Legend */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">Priority Guide</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                      <span className="text-red-400 font-medium text-sm">High Priority</span>
+                    </div>
+                    <p className="text-zinc-500 text-xs">Immediate buying signals. Contact ASAP.</p>
+                  </div>
+                  <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                      <span className="text-yellow-400 font-medium text-sm">Medium Priority</span>
+                    </div>
+                    <p className="text-zinc-500 text-xs">Good engagement opportunity. Add to sequence.</p>
+                  </div>
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                      <span className="text-blue-400 font-medium text-sm">Low Priority</span>
+                    </div>
+                    <p className="text-zinc-500 text-xs">Nice to know. Use for personalization.</p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ICP Tab */}
+          {activeTab === 'icp' && (
+            <>
+              {/* ICP Overview */}
+              <div className="bg-gradient-to-br from-yellow-400/10 to-yellow-600/5 border border-yellow-400/20 rounded-xl p-6 mb-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white mb-2">🎯 Ideal Customer Profile</h3>
+                    <p className="text-zinc-400 text-sm">Define your perfect customer. This profile is used to automatically score companies and prioritize your outreach.</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-bold text-yellow-400">{calculateICPMaxScore()}</div>
+                    <div className="text-xs text-zinc-500">Max Score</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Target Industries */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">🏷️ Target Industries</h3>
+                <div className="space-y-2">
+                  {settings.icp.industries.map((ind, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-800/50">
+                      <input
+                        type="checkbox"
+                        checked={ind.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.industries]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, industries: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className={`flex-1 text-sm ${ind.enabled ? 'text-white' : 'text-zinc-500'}`}>{ind.name}</span>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={ind.weight}
+                        onChange={(e) => {
+                          const updated = [...settings.icp.industries]
+                          updated[idx].weight = parseInt(e.target.value)
+                          setSettings({ ...settings, icp: { ...settings.icp, industries: updated } })
+                        }}
+                        disabled={!ind.enabled}
+                        className="w-24 accent-yellow-400"
+                      />
+                      <span className={`w-8 text-sm text-right ${ind.enabled ? 'text-yellow-400' : 'text-zinc-600'}`}>{ind.weight}</span>
+                      <button
+                        onClick={() => {
+                          const updated = settings.icp.industries.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, industries: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-sm"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="text"
+                    value={newIndustry}
+                    onChange={(e) => setNewIndustry(e.target.value)}
+                    placeholder="Add industry..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                    onKeyPress={(e) => e.key === 'Enter' && newIndustry.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, industries: [...settings.icp.industries, { name: newIndustry.trim(), weight: 5, enabled: true }] } }),
+                      setNewIndustry('')
+                    )}
+                  />
+                  <button
+                    onClick={() => newIndustry.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, industries: [...settings.icp.industries, { name: newIndustry.trim(), weight: 5, enabled: true }] } }),
+                      setNewIndustry('')
+                    )}
+                    className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium"
+                  >+ Add</button>
+                </div>
+              </div>
+
+              {/* Company Size */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">👥 Company Size</h3>
+                <div className="space-y-2">
+                  {settings.icp.companySizes.map((size, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-800/50">
+                      <input
+                        type="checkbox"
+                        checked={size.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.companySizes]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, companySizes: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className={`w-24 text-sm ${size.enabled ? 'text-white' : 'text-zinc-500'}`}>{size.label} employees</span>
+                      <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className={`h-full ${size.enabled ? 'bg-yellow-400' : 'bg-zinc-700'}`} style={{ width: `${size.weight * 10}%` }}></div>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={size.weight}
+                        onChange={(e) => {
+                          const updated = [...settings.icp.companySizes]
+                          updated[idx].weight = parseInt(e.target.value)
+                          setSettings({ ...settings, icp: { ...settings.icp, companySizes: updated } })
+                        }}
+                        disabled={!size.enabled}
+                        className="w-24 accent-yellow-400"
+                      />
+                      <span className={`w-8 text-sm text-right ${size.enabled ? 'text-yellow-400' : 'text-zinc-600'}`}>{size.weight}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Funding Stage */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">💰 Funding Stage</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {settings.icp.fundingStages.map((stage, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        const updated = [...settings.icp.fundingStages]
+                        updated[idx].enabled = !updated[idx].enabled
+                        setSettings({ ...settings, icp: { ...settings.icp, fundingStages: updated } })
+                      }}
+                      className={`p-3 rounded-lg cursor-pointer border transition-all ${stage.enabled ? 'bg-yellow-400/10 border-yellow-400/50 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-500'}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-sm">{stage.name}</span>
+                        {stage.enabled && <span className="text-yellow-400 text-xs">+{stage.weight}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Geography */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">🌍 Target Geography</h3>
+                <div className="flex flex-wrap gap-2">
+                  {settings.icp.geographies.map((geo, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        const updated = [...settings.icp.geographies]
+                        updated[idx].enabled = !updated[idx].enabled
+                        setSettings({ ...settings, icp: { ...settings.icp, geographies: updated } })
+                      }}
+                      className={`px-3 py-2 rounded-lg cursor-pointer border transition-all flex items-center gap-2 ${geo.enabled ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' : 'bg-zinc-950 border-zinc-800 text-zinc-500'}`}
+                    >
+                      <span className="text-sm">{geo.name}</span>
+                      {geo.enabled && (
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={geo.weight}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const updated = [...settings.icp.geographies]
+                            updated[idx].weight = parseInt(e.target.value) || 1
+                            setSettings({ ...settings, icp: { ...settings.icp, geographies: updated } })
+                          }}
+                          className="w-10 px-1 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-xs text-center"
+                        />
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const updated = settings.icp.geographies.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, geographies: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-xs"
+                      >✕</button>
+                    </div>
+                  ))}
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      value={newGeo}
+                      onChange={(e) => setNewGeo(e.target.value)}
+                      placeholder="Add region..."
+                      className="w-32 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      onKeyPress={(e) => e.key === 'Enter' && newGeo.trim() && (
+                        setSettings({ ...settings, icp: { ...settings.icp, geographies: [...settings.icp.geographies, { name: newGeo.trim(), weight: 5, enabled: true }] } }),
+                        setNewGeo('')
+                      )}
+                    />
+                    <button
+                      onClick={() => newGeo.trim() && (
+                        setSettings({ ...settings, icp: { ...settings.icp, geographies: [...settings.icp.geographies, { name: newGeo.trim(), weight: 5, enabled: true }] } }),
+                        setNewGeo('')
+                      )}
+                      className="px-2 py-1 bg-zinc-800 text-white rounded-lg text-sm"
+                    >+</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Buying Signals */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">📈 Buying Signals (Positive)</h3>
+                <div className="space-y-2">
+                  {settings.icp.buyingSignals.map((signal, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-800/50">
+                      <input
+                        type="checkbox"
+                        checked={signal.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.buyingSignals]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, buyingSignals: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className={`flex-1 text-sm ${signal.enabled ? 'text-white' : 'text-zinc-500'}`}>{signal.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-400 text-sm">+</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="50"
+                          value={signal.points}
+                          onChange={(e) => {
+                            const updated = [...settings.icp.buyingSignals]
+                            updated[idx].points = parseInt(e.target.value) || 1
+                            setSettings({ ...settings, icp: { ...settings.icp, buyingSignals: updated } })
+                          }}
+                          disabled={!signal.enabled}
+                          className="w-16 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-emerald-400 text-sm text-center"
+                        />
+                        <span className="text-zinc-500 text-xs">pts</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const updated = settings.icp.buyingSignals.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, buyingSignals: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-sm"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="text"
+                    value={newBuyingSignal}
+                    onChange={(e) => setNewBuyingSignal(e.target.value)}
+                    placeholder="Add buying signal..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                  />
+                  <button
+                    onClick={() => newBuyingSignal.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, buyingSignals: [...settings.icp.buyingSignals, { name: newBuyingSignal.trim(), points: 10, enabled: true }] } }),
+                      setNewBuyingSignal('')
+                    )}
+                    className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-medium"
+                  >+ Add</button>
+                </div>
+              </div>
+
+              {/* Negative Signals */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">📉 Negative Signals (Penalties)</h3>
+                <div className="space-y-2">
+                  {settings.icp.negativeSignals.map((signal, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-800/50">
+                      <input
+                        type="checkbox"
+                        checked={signal.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.negativeSignals]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, negativeSignals: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className={`flex-1 text-sm ${signal.enabled ? 'text-white' : 'text-zinc-500'}`}>{signal.name}</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="-50"
+                          max="-1"
+                          value={signal.points}
+                          onChange={(e) => {
+                            const updated = [...settings.icp.negativeSignals]
+                            updated[idx].points = parseInt(e.target.value) || -1
+                            setSettings({ ...settings, icp: { ...settings.icp, negativeSignals: updated } })
+                          }}
+                          disabled={!signal.enabled}
+                          className="w-16 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-red-400 text-sm text-center"
+                        />
+                        <span className="text-zinc-500 text-xs">pts</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const updated = settings.icp.negativeSignals.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, negativeSignals: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-sm"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="text"
+                    value={newNegativeSignal}
+                    onChange={(e) => setNewNegativeSignal(e.target.value)}
+                    placeholder="Add negative signal..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                  />
+                  <button
+                    onClick={() => newNegativeSignal.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, negativeSignals: [...settings.icp.negativeSignals, { name: newNegativeSignal.trim(), points: -10, enabled: true }] } }),
+                      setNewNegativeSignal('')
+                    )}
+                    className="px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-medium"
+                  >+ Add</button>
+                </div>
+              </div>
+
+              {/* Target Titles */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">👔 Target Titles</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="text-xs text-yellow-400 uppercase mb-2">Primary Contacts</h4>
+                    <div className="space-y-1">
+                      {settings.icp.targetTitles.filter(t => t.priority === 'primary').map((title, idx) => (
+                        <div key={idx} className="flex items-center gap-2 px-3 py-2 bg-yellow-400/10 border border-yellow-400/30 rounded-lg">
+                          <span className="text-white text-sm flex-1">{title.title}</span>
+                          <button
+                            onClick={() => {
+                              const updated = settings.icp.targetTitles.filter(t => t.title !== title.title)
+                              setSettings({ ...settings, icp: { ...settings.icp, targetTitles: updated } })
+                            }}
+                            className="text-zinc-500 hover:text-red-400 text-sm"
+                          >✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="text-xs text-zinc-400 uppercase mb-2">Secondary Contacts</h4>
+                    <div className="space-y-1">
+                      {settings.icp.targetTitles.filter(t => t.priority === 'secondary').map((title, idx) => (
+                        <div key={idx} className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded-lg">
+                          <span className="text-zinc-300 text-sm flex-1">{title.title}</span>
+                          <button
+                            onClick={() => {
+                              const updated = settings.icp.targetTitles.filter(t => t.title !== title.title)
+                              setSettings({ ...settings, icp: { ...settings.icp, targetTitles: updated } })
+                            }}
+                            className="text-zinc-600 hover:text-red-400 text-sm"
+                          >✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <input
+                    type="text"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="Add title..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                  />
+                  <button
+                    onClick={() => newTitle.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, targetTitles: [...settings.icp.targetTitles, { title: newTitle.trim(), priority: 'primary' }] } }),
+                      setNewTitle('')
+                    )}
+                    className="px-3 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium"
+                  >+ Primary</button>
+                  <button
+                    onClick={() => newTitle.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, targetTitles: [...settings.icp.targetTitles, { title: newTitle.trim(), priority: 'secondary' }] } }),
+                      setNewTitle('')
+                    )}
+                    className="px-3 py-2 bg-zinc-700 text-white rounded-lg text-sm font-medium"
+                  >+ Secondary</button>
+                </div>
+              </div>
+
+              {/* Tech Stack */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">⚙️ Tech Stack Indicators</h3>
+                <div className="flex flex-wrap gap-2">
+                  {settings.icp.techStack.map((tech, idx) => (
+                    <div
+                      key={idx}
+                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${tech.enabled ? 'bg-blue-500/10 border-blue-500/50 text-blue-400' : 'bg-zinc-950 border-zinc-800 text-zinc-500'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={tech.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.techStack]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, techStack: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className="text-sm">{tech.name}</span>
+                      {tech.enabled && (
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={tech.weight}
+                          onChange={(e) => {
+                            const updated = [...settings.icp.techStack]
+                            updated[idx].weight = parseInt(e.target.value) || 1
+                            setSettings({ ...settings, icp: { ...settings.icp, techStack: updated } })
+                          }}
+                          className="w-10 px-1 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-xs text-center"
+                        />
+                      )}
+                      <button
+                        onClick={() => {
+                          const updated = settings.icp.techStack.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, techStack: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-xs"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="text"
+                    value={newTech}
+                    onChange={(e) => setNewTech(e.target.value)}
+                    placeholder="Add technology..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                    onKeyPress={(e) => e.key === 'Enter' && newTech.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, techStack: [...settings.icp.techStack, { name: newTech.trim(), weight: 5, enabled: true }] } }),
+                      setNewTech('')
+                    )}
+                  />
+                  <button
+                    onClick={() => newTech.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, techStack: [...settings.icp.techStack, { name: newTech.trim(), weight: 5, enabled: true }] } }),
+                      setNewTech('')
+                    )}
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium"
+                  >+ Add</button>
+                </div>
+              </div>
+
+              {/* Scoring Preview */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">📊 Score Calculation Preview</h3>
+                <div className="bg-zinc-950 rounded-lg p-4 font-mono text-xs">
+                  <div className="text-zinc-500 mb-2">// Max possible score breakdown:</div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Industries (best match):</span>
+                      <span className="text-yellow-400">+{Math.max(...settings.icp.industries.filter(i => i.enabled).map(i => i.weight), 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Company Size (best match):</span>
+                      <span className="text-yellow-400">+{Math.max(...settings.icp.companySizes.filter(s => s.enabled).map(s => s.weight), 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Funding Stage (best match):</span>
+                      <span className="text-yellow-400">+{Math.max(...settings.icp.fundingStages.filter(f => f.enabled).map(f => f.weight), 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Geography (best match):</span>
+                      <span className="text-yellow-400">+{Math.max(...settings.icp.geographies.filter(g => g.enabled).map(g => g.weight), 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Buying Signals (all):</span>
+                      <span className="text-emerald-400">+{settings.icp.buyingSignals.filter(s => s.enabled).reduce((sum, s) => sum + s.points, 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Tech Stack (all matches):</span>
+                      <span className="text-blue-400">+{settings.icp.techStack.filter(t => t.enabled).reduce((sum, t) => sum + t.weight, 0)}</span>
+                    </div>
+                    <div className="border-t border-zinc-800 my-2"></div>
+                    <div className="flex justify-between text-white">
+                      <span>Max Possible Score:</span>
+                      <span className="text-yellow-400 font-bold">{calculateICPMaxScore()}</span>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-zinc-500 text-xs mt-3">ICP scores are normalized to 0-100 scale. Companies scoring 70+ are considered high-fit.</p>
+              </div>
+            </>
+          )}
+
+          {/* Integrations Tab */}
+          {activeTab === 'integrations' && (
+            <IntegrationsTab />
           )}
         </div>
       </main>
@@ -1188,343 +1563,131 @@ export default function SavedPage() {
   )
 }
 
-// Grading Tab Component with AI Suggestions
-function GradingTab({ selected, gradingForm, setGradingForm, saveGrading }: any) {
-  const [suggesting, setSuggesting] = useState(false)
-  const [suggestion, setSuggestion] = useState<any>(null)
+// Integrations Tab Component
+function IntegrationsTab() {
+  const [gmailStatus, setGmailStatus] = useState<{connected: boolean, email?: string, loading: boolean}>({ connected: false, loading: true })
+  const [disconnecting, setDisconnecting] = useState(false)
 
-  // Scoring constants from grading system
-  const FUNDING_DATE_SCORES: Record<string, number> = { '0-1m': 5, '2-6m': 4, '6m-1y': 3, '1y-3y': 2.5, '3y-5y': 1, '>5y': 0 }
-  const FUNDING_STAGE_SCORES: Record<string, number> = { 'Seed': 3, 'Series A': 5, 'Series B': 5, 'Series C': 4, 'Private Equity': 4, 'Series D+': 3, 'IPO': 2 }
-  const FUNDING_AMOUNT_SCORES: Record<string, number> = { '<100k': 0, '100k-500k': 1, '500k-2m': 5, '2m-5m': 5, '5m-20m': 4, '>20m': 3 }
-  const REVENUE_SCORES: Record<string, number> = { '<1m': 0, '1m-10m': 5, '10m-50m': 5, '50m-100m': 3, '100m-500m': 2, '>500m': 1 }
-  const COMPANY_SIZE_SCORES: Record<string, number> = { '1-10': 3, '11-50': 5, '51-200': 5, '201-500': 5, '501-1000': 4, '1001-5000': 3, '5000+': 2 }
-  const GEOGRAPHY_SCORES: Record<string, number> = {
-    'United States': 5, 'United Kingdom': 5, 'Canada': 5,
-    'Australia': 4, 'Ireland': 4, 'Israel': 4, 'Netherlands': 4, 'Singapore': 4, 'Sweden': 4, 'Switzerland': 4, 'UAE': 4,
-    'Germany': 3, 'France': 3, 'Belgium': 3, 'Austria': 3,
-    'Spain': 2, 'Italy': 2, 'Portugal': 2, 'Other': 1
-  }
-  const TITLE_SCORES: Record<string, number> = {
-    'CxO Tech': 5, 'CxO Leadership': 5, 'CxO Operations': 4,
-    'VP Tech': 5, 'VP Operations': 4, 'Director Tech': 5, 'Director Operations': 4,
-    'Head Tech': 5, 'Head Operations': 4, 'Manager': 3, 'Other': 2
-  }
-  const INDUSTRY_SCORES: Record<string, number> = { 'Tech/SaaS': 5, 'Fintech': 5, 'Data/Analytics': 5, 'Manufacturing': 4, 'Healthcare': 3, 'Services': 2, 'Other': 1 }
-  const CONNECTIONS_SCORES: Record<string, number> = { '<100': 0, '100-300': 2, '300-500': 4, '500+': 5 }
-  const YEARS_POSITION_SCORES: Record<string, number> = { '<1': 2, '1-2': 5, '2-4': 3, '4+': 1 }
-  const YEARS_COMPANY_SCORES: Record<string, number> = { '<1': 3, '1-3': 5, '3-6': 3, '6+': 1 }
-  const YEAR_FOUNDED_SCORES: Record<string, number> = { '<3': 1, '3-5': 3, '5-15': 5, '15-30': 3, '30+': 1 }
+  useEffect(() => {
+    checkGmailStatus()
+    // Check URL params for connection result
+    const params = new URLSearchParams(window.location.search)
+    const gmailResult = params.get('gmail')
+    if (gmailResult === 'connected') {
+      checkGmailStatus()
+      // Clean URL
+      window.history.replaceState({}, '', '/settings?tab=integrations')
+    }
+  }, [])
 
-  const calculateScore = () => {
-    let totalScore = 0
-    let maxScore = 0
-    let filledCount = 0
-    const totalCriteria = 14 // Total number of grading criteria
-
-    // HIGH PRIORITY (k=3)
-    if (gradingForm.buyerIntent !== undefined && gradingForm.buyerIntent !== null) { totalScore += (gradingForm.buyerIntent ? 5 : 0) * 3; maxScore += 15; filledCount++ }
-    if (gradingForm.activelyHiring !== undefined && gradingForm.activelyHiring !== null) { totalScore += (gradingForm.activelyHiring ? 5 : 0) * 3; maxScore += 15; filledCount++ }
-    if (gradingForm.lastFundingDate) { totalScore += (FUNDING_DATE_SCORES[gradingForm.lastFundingDate] || 0) * 3; maxScore += 15; filledCount++ }
-    if (gradingForm.fundingStage) { totalScore += (FUNDING_STAGE_SCORES[gradingForm.fundingStage] || 0) * 3; maxScore += 15; filledCount++ }
-    if (gradingForm.fundingAmount) { totalScore += (FUNDING_AMOUNT_SCORES[gradingForm.fundingAmount] || 0) * 3; maxScore += 15; filledCount++ }
-    if (gradingForm.revenueRange) { totalScore += (REVENUE_SCORES[gradingForm.revenueRange] || 0) * 3; maxScore += 15; filledCount++ }
-    if (gradingForm.titleCategory) { totalScore += (TITLE_SCORES[gradingForm.titleCategory] || 0) * 3; maxScore += 15; filledCount++ }
-
-    // MEDIUM PRIORITY (k=2)
-    if (gradingForm.companySize) { totalScore += (COMPANY_SIZE_SCORES[gradingForm.companySize] || 0) * 2; maxScore += 10; filledCount++ }
-    if (gradingForm.industry) { totalScore += (INDUSTRY_SCORES[gradingForm.industry] || 0) * 2; maxScore += 10; filledCount++ }
-    if (gradingForm.geography) { totalScore += (GEOGRAPHY_SCORES[gradingForm.geography] || 0) * 2; maxScore += 10; filledCount++ }
-
-    // LOW PRIORITY (k=1)
-    if (gradingForm.connections) { totalScore += (CONNECTIONS_SCORES[gradingForm.connections] || 0) * 1; maxScore += 5; filledCount++ }
-    if (gradingForm.yearsPosition) { totalScore += (YEARS_POSITION_SCORES[gradingForm.yearsPosition] || 0) * 1; maxScore += 5; filledCount++ }
-    if (gradingForm.yearsCompany) { totalScore += (YEARS_COMPANY_SCORES[gradingForm.yearsCompany] || 0) * 1; maxScore += 5; filledCount++ }
-    if (gradingForm.yearFounded) { totalScore += (YEAR_FOUNDED_SCORES[gradingForm.yearFounded] || 0) * 1; maxScore += 5; filledCount++ }
-
-    const normalized = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0
-    const dataCompleteness = Math.round((filledCount / totalCriteria) * 100)
-    const isLowData = dataCompleteness < 50
-    
-    return { 
-      score: normalized, 
-      filled: filledCount, 
-      total: totalCriteria,
-      completeness: dataCompleteness,
-      isLowData,
-      grade: normalized >= 81 ? 'A' : normalized >= 61 ? 'B' : normalized >= 41 ? 'C' : normalized >= 21 ? 'D' : 'E' 
+  const checkGmailStatus = async () => {
+    try {
+      const res = await fetch('/api/gmail/status')
+      const data = await res.json()
+      setGmailStatus({ connected: data.connected, email: data.email, loading: false })
+    } catch {
+      setGmailStatus({ connected: false, loading: false })
     }
   }
 
-  const getSuggestion = async () => {
-    if (!selected) return
-    setSuggesting(true)
-    try {
-      let companyProfile = ''
-      try { const stored = localStorage.getItem('llm-settings'); if (stored) companyProfile = JSON.parse(stored).companyDescription || '' } catch {}
-      
-      const res = await fetch('/api/grading/suggest', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company: selected, companyProfile })
-      })
-      const data = await res.json()
-      if (data.success && data.suggestion) {
-        const s = data.suggestion
-        setSuggestion(s)
-        // Auto-fill from AI
-        if (s.scoringData) {
-          setGradingForm({
-            ...gradingForm,
-            buyerIntent: s.scoringData.buyerIntent || gradingForm.buyerIntent,
-            activelyHiring: s.scoringData.activelyHiring || gradingForm.activelyHiring,
-            fundingStage: s.scoringData.fundingStage !== 'unknown' ? s.scoringData.fundingStage : gradingForm.fundingStage,
-            companySize: s.scoringData.companySize !== 'unknown' ? s.scoringData.companySize : gradingForm.companySize,
-            geography: s.scoringData.geography !== 'unknown' ? s.scoringData.geography : gradingForm.geography
-          })
-        }
-      }
-    } catch (e) { console.error('Suggestion failed:', e) }
-    setSuggesting(false)
+  const connectGmail = () => {
+    window.location.href = '/api/gmail/auth'
   }
 
-  const { score, filled, total, completeness, isLowData, grade } = calculateScore()
+  const disconnectGmail = async () => {
+    if (!confirm('Disconnect Gmail account?')) return
+    setDisconnecting(true)
+    try {
+      await fetch('/api/gmail/status', { method: 'DELETE' })
+      setGmailStatus({ connected: false, loading: false })
+    } catch (e) {
+      console.error('Disconnect error:', e)
+    }
+    setDisconnecting(false)
+  }
 
   return (
-    <div className="space-y-3">
-      {/* Score Display */}
-      <div className={`rounded-lg p-3 flex items-center justify-between ${isLowData ? 'bg-red-950/30 border border-red-500/30' : 'bg-zinc-800'}`}>
-        <div>
-          <span className="text-zinc-400 text-xs">Lead Score</span>
-          <div className="text-2xl font-bold text-white">{score}<span className="text-sm text-zinc-500">/100</span></div>
-          <div className="flex items-center gap-2 mt-1">
-            <div className="w-20 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
-              <div className={`h-full rounded-full ${completeness >= 50 ? 'bg-emerald-500' : 'bg-red-500'}`} style={{ width: `${completeness}%` }} />
+    <>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h3 className="text-sm font-semibold text-white mb-4">Gmail Integration</h3>
+        <p className="text-zinc-500 text-sm mb-4">Connect your Gmail account to send emails, save drafts, and schedule messages directly from the app.</p>
+        
+        {gmailStatus.loading ? (
+          <div className="flex items-center gap-2 text-zinc-500">
+            <div className="w-4 h-4 border-2 border-zinc-600 border-t-zinc-400 rounded-full animate-spin"></div>
+            Checking connection...
+          </div>
+        ) : gmailStatus.connected ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+              <span className="text-xl">✅</span>
+              <div className="flex-1">
+                <p className="text-white text-sm font-medium">Connected</p>
+                <p className="text-zinc-400 text-xs">{gmailStatus.email}</p>
+              </div>
+              <button
+                onClick={disconnectGmail}
+                disabled={disconnecting}
+                className="px-3 py-1.5 bg-zinc-800 text-zinc-400 rounded-lg text-xs hover:bg-red-500/20 hover:text-red-400 disabled:opacity-50"
+              >
+                {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+              </button>
             </div>
-            <span className={`text-[10px] ${isLowData ? 'text-red-400' : 'text-zinc-500'}`}>{filled}/{total} fields</span>
-          </div>
-        </div>
-        <div className="text-center">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${
-            isLowData ? 'bg-zinc-700 ring-2 ring-red-500' :
-            grade === 'A' ? 'bg-emerald-500' : grade === 'B' ? 'bg-blue-500' : grade === 'C' ? 'bg-yellow-500 text-zinc-900' : grade === 'D' ? 'bg-orange-500' : 'bg-red-500'
-          }`}>{grade}</div>
-          {isLowData && <span className="text-[10px] text-red-400 mt-1 block">Low data</span>}
-        </div>
-      </div>
-
-      {/* Low data warning */}
-      {isLowData && (
-        <div className="p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-          <p className="text-xs text-red-400">⚠️ Less than 50% of criteria filled. Grade may be unreliable.</p>
-          <p className="text-[10px] text-red-300 mt-1">Run &quot;Deep Research&quot; to auto-fill more fields.</p>
-        </div>
-      )}
-
-      {/* AI Suggestion */}
-      <button onClick={getSuggestion} disabled={suggesting} className="w-full py-2 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg text-sm font-medium hover:bg-purple-500/30 disabled:opacity-50">
-        {suggesting ? '🔄 Analyzing...' : '🤖 Auto-Fill with AI'}
-      </button>
-
-      {suggestion && (
-        <div className="bg-purple-950/30 border border-purple-900/50 rounded-lg p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-purple-400">AI Score: {suggestion.score}/100</span>
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${suggestion.suggestedGrade === 'A' ? 'bg-emerald-500' : suggestion.suggestedGrade === 'B' ? 'bg-blue-500' : 'bg-yellow-500 text-zinc-900'}`}>
-              {suggestion.suggestedGrade}
-            </span>
-          </div>
-          {suggestion.painPoints?.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {suggestion.painPoints.slice(0,3).map((p: string, i: number) => (
-                <span key={i} className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-[10px] rounded">{p}</span>
-              ))}
+            <div className="text-xs text-zinc-600">
+              You can now send emails, save drafts, and schedule messages from the Generate page.
             </div>
-          )}
-          {suggestion.outreachAngle && <p className="text-zinc-400 text-xs">{suggestion.outreachAngle}</p>}
-        </div>
-      )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <button
+              onClick={connectGmail}
+              className="flex items-center gap-2 px-4 py-2 bg-white text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-100"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Connect Gmail Account
+            </button>
+            <div className="text-xs text-zinc-600">
+              We'll request permission to send emails on your behalf. Your credentials are stored securely.
+            </div>
+          </div>
+        )}
+      </div>
 
-      {/* HIGH PRIORITY (k=3) */}
-      <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-lg p-3">
-        <p className="text-xs font-medium text-emerald-400 mb-2">HIGH PRIORITY (×3)</p>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex items-center gap-2 bg-zinc-950 p-2 rounded cursor-pointer text-sm">
-            <input type="checkbox" checked={gradingForm.buyerIntent || false} onChange={e => setGradingForm({...gradingForm, buyerIntent: e.target.checked})} className="rounded" />
-            <span className="text-white">Buyer Intent</span>
-          </label>
-          <label className="flex items-center gap-2 bg-zinc-950 p-2 rounded cursor-pointer text-sm">
-            <input type="checkbox" checked={gradingForm.activelyHiring || false} onChange={e => setGradingForm({...gradingForm, activelyHiring: e.target.checked})} className="rounded" />
-            <span className="text-white">Actively Hiring</span>
-          </label>
-          <div>
-            <label className="text-[10px] text-zinc-500">Last Funding Date</label>
-            <select value={gradingForm.lastFundingDate || ''} onChange={e => setGradingForm({...gradingForm, lastFundingDate: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">Select...</option>
-              <option value="0-1m">0-1 months (5)</option>
-              <option value="2-6m">2-6 months (4)</option>
-              <option value="6m-1y">6m-1 year (3)</option>
-              <option value="1y-3y">1-3 years (2.5)</option>
-              <option value="3y-5y">3-5 years (1)</option>
-              <option value=">5y">&gt;5 years (0)</option>
-            </select>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h3 className="text-sm font-semibold text-white mb-4">Email Features</h3>
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="p-3 bg-zinc-950 rounded-lg">
+            <span className="text-xl block mb-2">🚀</span>
+            <h4 className="text-white text-sm font-medium mb-1">Send Now</h4>
+            <p className="text-zinc-500 text-xs">Send emails immediately through your Gmail</p>
           </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">Funding Stage</label>
-            <select value={gradingForm.fundingStage || ''} onChange={e => setGradingForm({...gradingForm, fundingStage: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">Select...</option>
-              <option value="Series A">Series A (5)</option>
-              <option value="Series B">Series B (5)</option>
-              <option value="Series C">Series C (4)</option>
-              <option value="Private Equity">Private Equity (4)</option>
-              <option value="Seed">Seed (3)</option>
-              <option value="Series D+">Series D+ (3)</option>
-              <option value="IPO">IPO/Public (2)</option>
-            </select>
+          <div className="p-3 bg-zinc-950 rounded-lg">
+            <span className="text-xl block mb-2">📝</span>
+            <h4 className="text-white text-sm font-medium mb-1">Save as Draft</h4>
+            <p className="text-zinc-500 text-xs">Save to Gmail drafts for review before sending</p>
           </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">Funding Amount</label>
-            <select value={gradingForm.fundingAmount || ''} onChange={e => setGradingForm({...gradingForm, fundingAmount: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">Select...</option>
-              <option value="500k-2m">$500K-$2M (5)</option>
-              <option value="2m-5m">$2M-$5M (5)</option>
-              <option value="5m-20m">$5M-$20M (4)</option>
-              <option value=">20m">&gt;$20M (3)</option>
-              <option value="100k-500k">$100K-$500K (1)</option>
-              <option value="<100k">&lt;$100K (0)</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">Revenue Range</label>
-            <select value={gradingForm.revenueRange || ''} onChange={e => setGradingForm({...gradingForm, revenueRange: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">Select...</option>
-              <option value="1m-10m">$1M-$10M (5)</option>
-              <option value="10m-50m">$10M-$50M (5)</option>
-              <option value="50m-100m">$50M-$100M (3)</option>
-              <option value="100m-500m">$100M-$500M (2)</option>
-              <option value=">500m">&gt;$500M (1)</option>
-              <option value="<1m">&lt;$1M (0)</option>
-            </select>
-          </div>
-          <div className="col-span-2">
-            <label className="text-[10px] text-zinc-500">Title Category</label>
-            <select value={gradingForm.titleCategory || ''} onChange={e => setGradingForm({...gradingForm, titleCategory: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">Select...</option>
-              <option value="CxO Tech">CxO + Technology (5)</option>
-              <option value="CxO Leadership">CxO + Leadership (5)</option>
-              <option value="VP Tech">VP + Technology (5)</option>
-              <option value="Director Tech">Director + Technology (5)</option>
-              <option value="Head Tech">Head + Technology (5)</option>
-              <option value="CxO Operations">CxO + Operations (4)</option>
-              <option value="VP Operations">VP + Operations (4)</option>
-              <option value="Director Operations">Director + Operations (4)</option>
-              <option value="Manager">Manager (3)</option>
-              <option value="Other">Other (2)</option>
-            </select>
+          <div className="p-3 bg-zinc-950 rounded-lg">
+            <span className="text-xl block mb-2">🕐</span>
+            <h4 className="text-white text-sm font-medium mb-1">Schedule</h4>
+            <p className="text-zinc-500 text-xs">Queue emails to send at optimal times</p>
           </div>
         </div>
       </div>
 
-      {/* MEDIUM PRIORITY (k=2) */}
-      <div className="bg-blue-950/30 border border-blue-900/50 rounded-lg p-3">
-        <p className="text-xs font-medium text-blue-400 mb-2">MEDIUM PRIORITY (×2)</p>
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <label className="text-[10px] text-zinc-500">Company Size</label>
-            <select value={gradingForm.companySize || ''} onChange={e => setGradingForm({...gradingForm, companySize: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">Select...</option>
-              <option value="11-50">11-50 (5)</option>
-              <option value="51-200">51-200 (5)</option>
-              <option value="201-500">201-500 (5)</option>
-              <option value="501-1000">501-1000 (4)</option>
-              <option value="1-10">1-10 (3)</option>
-              <option value="1001-5000">1001-5000 (3)</option>
-              <option value="5000+">5000+ (2)</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">Industry</label>
-            <select value={gradingForm.industry || ''} onChange={e => setGradingForm({...gradingForm, industry: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">Select...</option>
-              <option value="Tech/SaaS">Tech/SaaS (5)</option>
-              <option value="Fintech">Fintech (5)</option>
-              <option value="Data/Analytics">Data/Analytics (5)</option>
-              <option value="Manufacturing">Manufacturing (4)</option>
-              <option value="Healthcare">Healthcare (3)</option>
-              <option value="Services">Services (2)</option>
-              <option value="Other">Other (1)</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">Geography</label>
-            <select value={gradingForm.geography || ''} onChange={e => setGradingForm({...gradingForm, geography: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">Select...</option>
-              <option value="United States">United States (5)</option>
-              <option value="United Kingdom">United Kingdom (5)</option>
-              <option value="Canada">Canada (5)</option>
-              <option value="Australia">Australia (4)</option>
-              <option value="Israel">Israel (4)</option>
-              <option value="Netherlands">Netherlands (4)</option>
-              <option value="Singapore">Singapore (4)</option>
-              <option value="Germany">Germany (3)</option>
-              <option value="France">France (3)</option>
-              <option value="Spain">Spain (2)</option>
-              <option value="Other">Other (1)</option>
-            </select>
-          </div>
-        </div>
+      <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl p-4">
+        <h4 className="text-yellow-400 font-medium text-sm mb-2">🔒 Privacy & Security</h4>
+        <ul className="text-zinc-400 text-xs space-y-1">
+          <li>• OAuth 2.0 authentication (we never see your password)</li>
+          <li>• Tokens stored encrypted in database</li>
+          <li>• You can disconnect anytime</li>
+          <li>• We only request necessary permissions</li>
+        </ul>
       </div>
-
-      {/* LOW PRIORITY (k=1) */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3">
-        <p className="text-xs font-medium text-zinc-500 mb-2">LOW PRIORITY (×1)</p>
-        <div className="grid grid-cols-4 gap-2">
-          <div>
-            <label className="text-[10px] text-zinc-500">Connections</label>
-            <select value={gradingForm.connections || ''} onChange={e => setGradingForm({...gradingForm, connections: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">...</option>
-              <option value="500+">500+ (5)</option>
-              <option value="300-500">300-500 (4)</option>
-              <option value="100-300">100-300 (2)</option>
-              <option value="<100">&lt;100 (0)</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">Yrs Position</label>
-            <select value={gradingForm.yearsPosition || ''} onChange={e => setGradingForm({...gradingForm, yearsPosition: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">...</option>
-              <option value="1-2">1-2 (5)</option>
-              <option value="2-4">2-4 (3)</option>
-              <option value="<1">&lt;1 (2)</option>
-              <option value="4+">4+ (1)</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">Yrs Company</label>
-            <select value={gradingForm.yearsCompany || ''} onChange={e => setGradingForm({...gradingForm, yearsCompany: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">...</option>
-              <option value="1-3">1-3 (5)</option>
-              <option value="<1">&lt;1 (3)</option>
-              <option value="3-6">3-6 (3)</option>
-              <option value="6+">6+ (1)</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">Founded</label>
-            <select value={gradingForm.yearFounded || ''} onChange={e => setGradingForm({...gradingForm, yearFounded: e.target.value})} className="w-full px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-white text-xs">
-              <option value="">...</option>
-              <option value="5-15">5-15y (5)</option>
-              <option value="3-5">3-5y (3)</option>
-              <option value="15-30">15-30y (3)</option>
-              <option value="<3">&lt;3y (1)</option>
-              <option value="30+">30+y (1)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <button onClick={saveGrading} className="w-full py-2.5 bg-yellow-400 text-zinc-900 rounded-lg font-semibold hover:bg-yellow-300">
-        Save Grade ({grade}) - {filled} criteria filled
-      </button>
-    </div>
+    </>
   )
 }
