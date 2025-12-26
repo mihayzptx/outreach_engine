@@ -109,6 +109,31 @@ export default function SavedPage() {
   const [icpSettings, setIcpSettings] = useState<any>(null)
   const [filterICP, setFilterICP] = useState('')
   const [scoringAll, setScoringAll] = useState(false)
+  
+  // Multi-select for bulk actions
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkActionRunning, setBulkActionRunning] = useState(false)
+  
+  // Add/Edit Company Modal
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null)
+  const [companyForm, setCompanyForm] = useState({
+    company_name: '',
+    industry: '',
+    country: '',
+    website: '',
+    employee_count: '',
+    revenue_range: '',
+    funding_stage: '',
+    funding_amount: '',
+    founded_year: '',
+    last_prospect_name: '',
+    last_prospect_title: '',
+    notes: ''
+  })
+  const [formError, setFormError] = useState('')
+  const [saving, setSaving] = useState(false)
+  
   const router = useRouter()
 
   useEffect(() => { 
@@ -341,10 +366,255 @@ export default function SavedPage() {
   }
 
   const deleteCompany = async (id: number) => {
-    if (!confirm('Delete this company?')) return
+    if (!confirm('Delete this company? This cannot be undone.')) return
     await fetch(`/api/companies?id=${id}`, { method: 'DELETE' })
     setSelected(null)
     fetchCompanies()
+  }
+
+  const openAddModal = () => {
+    setEditingCompany(null)
+    setCompanyForm({
+      company_name: '',
+      industry: '',
+      country: '',
+      website: '',
+      employee_count: '',
+      revenue_range: '',
+      funding_stage: '',
+      funding_amount: '',
+      founded_year: '',
+      last_prospect_name: '',
+      last_prospect_title: '',
+      notes: ''
+    })
+    setFormError('')
+    setShowAddModal(true)
+  }
+
+  const openEditModal = (company: Company) => {
+    setEditingCompany(company)
+    setCompanyForm({
+      company_name: company.company_name || '',
+      industry: company.industry || '',
+      country: company.country || '',
+      website: company.website || '',
+      employee_count: company.employee_count || '',
+      revenue_range: company.revenue_range || '',
+      funding_stage: company.funding_stage || '',
+      funding_amount: company.funding_amount || '',
+      founded_year: company.founded_year?.toString() || '',
+      last_prospect_name: company.last_prospect_name || '',
+      last_prospect_title: company.last_prospect_title || '',
+      notes: company.notes || ''
+    })
+    setFormError('')
+    setShowAddModal(true)
+  }
+
+  const saveCompany = async () => {
+    if (!companyForm.company_name.trim()) {
+      setFormError('Company name is required')
+      return
+    }
+
+    setSaving(true)
+    setFormError('')
+
+    try {
+      if (editingCompany) {
+        // Update existing
+        const res = await fetch('/api/companies/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editingCompany.id,
+            ...companyForm,
+            founded_year: companyForm.founded_year ? parseInt(companyForm.founded_year) : null
+          })
+        })
+        const data = await res.json()
+        if (!data.success) throw new Error(data.error || 'Failed to update')
+        
+        // Update selected if it's the same company
+        if (selected?.id === editingCompany.id && data.company) {
+          setSelected(data.company)
+        }
+      } else {
+        // Create new
+        const res = await fetch('/api/companies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...companyForm,
+            founded_year: companyForm.founded_year ? parseInt(companyForm.founded_year) : null
+          })
+        })
+        const data = await res.json()
+        
+        if (res.status === 409) {
+          setFormError('Company already exists')
+          setSaving(false)
+          return
+        }
+        
+        if (!res.ok) throw new Error(data.error || 'Failed to create')
+      }
+
+      setShowAddModal(false)
+      fetchCompanies()
+    } catch (e: any) {
+      setFormError(e.message || 'Failed to save')
+    }
+    
+    setSaving(false)
+  }
+
+  // Multi-select helpers
+  const toggleSelect = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const newSet = new Set(selectedIds)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    setSelectedIds(newSet)
+  }
+
+  const selectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filtered.map(c => c.id)))
+    }
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+  }
+
+  // Bulk actions
+  const bulkArchive = async () => {
+    if (!confirm(`Archive ${selectedIds.size} companies?`)) return
+    setBulkActionRunning(true)
+    
+    for (const id of selectedIds) {
+      await updateCompany(id, { is_archived: true, archived_at: new Date().toISOString() })
+    }
+    
+    clearSelection()
+    fetchCompanies()
+    setBulkActionRunning(false)
+  }
+
+  const bulkUnarchive = async () => {
+    if (!confirm(`Unarchive ${selectedIds.size} companies?`)) return
+    setBulkActionRunning(true)
+    
+    for (const id of selectedIds) {
+      await updateCompany(id, { is_archived: false, archived_at: null })
+    }
+    
+    clearSelection()
+    fetchCompanies()
+    setBulkActionRunning(false)
+  }
+
+  const bulkDelete = async () => {
+    if (!confirm(`Permanently delete ${selectedIds.size} companies? This cannot be undone.`)) return
+    setBulkActionRunning(true)
+    
+    for (const id of selectedIds) {
+      await fetch(`/api/companies?id=${id}`, { method: 'DELETE' })
+    }
+    
+    clearSelection()
+    fetchCompanies()
+    setBulkActionRunning(false)
+  }
+
+  const bulkResearch = async () => {
+    const toResearch = filtered.filter(c => selectedIds.has(c.id))
+    if (toResearch.length === 0) return
+    
+    setBulkActionRunning(true)
+    await runResearchBatch(toResearch)
+    clearSelection()
+    setBulkActionRunning(false)
+  }
+
+  const bulkScore = async () => {
+    if (!icpSettings) return
+    
+    const toScore = filtered.filter(c => selectedIds.has(c.id))
+    if (toScore.length === 0) return
+    
+    setBulkActionRunning(true)
+    
+    try {
+      const res = await fetch('/api/icp/score', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyIds: toScore.map(c => c.id),
+          icpSettings
+        })
+      })
+      const data = await res.json()
+      if (data.success) {
+        fetchCompanies()
+      }
+    } catch (e) {
+      console.error('Bulk score failed:', e)
+    }
+    
+    clearSelection()
+    setBulkActionRunning(false)
+  }
+
+  const bulkAddLabel = async (label: string) => {
+    setBulkActionRunning(true)
+    
+    for (const id of selectedIds) {
+      const company = companies.find(c => c.id === id)
+      if (company) {
+        const currentLabels = company.labels || []
+        if (!currentLabels.includes(label)) {
+          await updateCompany(id, { labels: [...currentLabels, label] })
+        }
+      }
+    }
+    
+    clearSelection()
+    fetchCompanies()
+    setBulkActionRunning(false)
+  }
+
+  const bulkExport = () => {
+    const toExport = filtered.filter(c => selectedIds.has(c.id))
+    const csv = [
+      ['Company', 'Industry', 'Country', 'Contact', 'Title', 'Website', 'Funding', 'Grade', 'ICP Score'].join(','),
+      ...toExport.map(c => [
+        `"${c.company_name}"`,
+        `"${c.industry || ''}"`,
+        `"${c.country || ''}"`,
+        `"${c.last_prospect_name || ''}"`,
+        `"${c.last_prospect_title || ''}"`,
+        `"${c.website || ''}"`,
+        `"${c.funding_stage || ''}"`,
+        c.lead_grade || '',
+        c.icp_score || ''
+      ].join(','))
+    ].join('\n')
+    
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `companies-export-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const archiveCompany = async (id: number) => {
@@ -980,6 +1250,9 @@ export default function SavedPage() {
 
             {/* Modal Footer */}
             <div className="p-4 border-t border-zinc-800 flex gap-2">
+              <button onClick={() => openEditModal(selected)} className="px-4 py-2 bg-zinc-800 text-zinc-400 rounded-lg text-sm hover:bg-zinc-700">
+                ✏️ Edit
+              </button>
               <button onClick={() => refreshCompany(selected.id, selected.company_name, selected.industry)} disabled={refreshing === selected.id} className="px-4 py-2 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg text-sm hover:bg-purple-500/30 disabled:opacity-50">
                 {refreshing === selected.id ? '⏳ Researching...' : '🔬 Deep Research'}
               </button>
@@ -1054,6 +1327,12 @@ export default function SavedPage() {
             </div>
             <div className="flex items-center gap-2">
               <button
+                onClick={openAddModal}
+                className="px-3 py-1.5 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold hover:bg-yellow-300"
+              >
+                + Add Company
+              </button>
+              <button
                 onClick={() => setShowArchived(!showArchived)}
                 className={`px-3 py-1.5 rounded-lg text-sm ${showArchived ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
               >
@@ -1105,6 +1384,101 @@ export default function SavedPage() {
             onChange={e => setSearchQuery(e.target.value)}
             className="mt-3 w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm placeholder-zinc-600 focus:border-yellow-400"
           />
+          
+          {/* Bulk Action Bar */}
+          {selectedIds.size > 0 && (
+            <div className="mt-3 p-3 bg-yellow-400/10 border border-yellow-400/30 rounded-lg flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === filtered.length}
+                  onChange={selectAll}
+                  className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-yellow-400 focus:ring-yellow-400"
+                />
+                <span className="text-yellow-400 text-sm font-medium">{selectedIds.size} selected</span>
+              </div>
+              
+              <div className="h-4 w-px bg-yellow-400/30"></div>
+              
+              <div className="flex items-center gap-2 flex-wrap">
+                {!showArchived ? (
+                  <button
+                    onClick={bulkArchive}
+                    disabled={bulkActionRunning}
+                    className="px-3 py-1 bg-zinc-800 text-zinc-300 rounded text-xs hover:bg-zinc-700 disabled:opacity-50"
+                  >
+                    📁 Archive
+                  </button>
+                ) : (
+                  <button
+                    onClick={bulkUnarchive}
+                    disabled={bulkActionRunning}
+                    className="px-3 py-1 bg-amber-500/20 text-amber-400 rounded text-xs hover:bg-amber-500/30 disabled:opacity-50"
+                  >
+                    📤 Unarchive
+                  </button>
+                )}
+                
+                <button
+                  onClick={bulkResearch}
+                  disabled={bulkActionRunning}
+                  className="px-3 py-1 bg-blue-500/20 text-blue-400 rounded text-xs hover:bg-blue-500/30 disabled:opacity-50"
+                >
+                  🔬 Research
+                </button>
+                
+                {icpSettings && (
+                  <button
+                    onClick={bulkScore}
+                    disabled={bulkActionRunning}
+                    className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs hover:bg-emerald-500/30 disabled:opacity-50"
+                  >
+                    🎯 Score ICP
+                  </button>
+                )}
+                
+                <div className="relative group">
+                  <button className="px-3 py-1 bg-purple-500/20 text-purple-400 rounded text-xs hover:bg-purple-500/30">
+                    🏷️ Add Label ▾
+                  </button>
+                  <div className="absolute top-full left-0 mt-1 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl hidden group-hover:block z-20 min-w-[120px]">
+                    {PREDEFINED_LABELS.map(label => (
+                      <button
+                        key={label}
+                        onClick={() => bulkAddLabel(label)}
+                        className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800 flex items-center gap-2"
+                      >
+                        <span className={`w-2 h-2 rounded-full ${LABEL_COLORS[label]}`}></span>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <button
+                  onClick={bulkExport}
+                  className="px-3 py-1 bg-zinc-800 text-zinc-300 rounded text-xs hover:bg-zinc-700"
+                >
+                  📥 Export CSV
+                </button>
+                
+                <button
+                  onClick={bulkDelete}
+                  disabled={bulkActionRunning}
+                  className="px-3 py-1 bg-red-500/20 text-red-400 rounded text-xs hover:bg-red-500/30 disabled:opacity-50"
+                >
+                  🗑️ Delete
+                </button>
+              </div>
+              
+              <button
+                onClick={clearSelection}
+                className="ml-auto text-yellow-400/70 hover:text-yellow-400 text-xs"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </header>
 
         <div className="p-4 lg:p-6">
@@ -1119,14 +1493,46 @@ export default function SavedPage() {
               <p className="text-zinc-500 text-sm mt-1">Save companies from the Generate page</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <>
+              {/* Select All Row */}
+              {filtered.length > 0 && (
+                <div className="flex items-center gap-2 mb-3 px-1">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.size === filtered.length && filtered.length > 0}
+                    onChange={selectAll}
+                    className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-yellow-400 focus:ring-yellow-400"
+                  />
+                  <span className="text-xs text-zinc-500">
+                    {selectedIds.size === filtered.length ? 'Deselect all' : 'Select all'} ({filtered.length})
+                  </span>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {filtered.map(c => (
                 <div
                   key={c.id}
                   onClick={() => openCompany(c)}
-                  className={`bg-zinc-900 border rounded-xl p-4 cursor-pointer hover:border-zinc-700 transition-all ${c.has_new_signals ? 'border-emerald-500/50' : 'border-zinc-800'}`}
+                  className={`bg-zinc-900 border rounded-xl p-4 cursor-pointer hover:border-zinc-700 transition-all relative ${
+                    selectedIds.has(c.id) ? 'border-yellow-400/50 bg-yellow-400/5' : 
+                    c.has_new_signals ? 'border-emerald-500/50' : 'border-zinc-800'
+                  }`}
                 >
-                  <div className="flex items-start gap-3 mb-3">
+                  {/* Checkbox */}
+                  <div 
+                    className="absolute top-3 left-3 z-10"
+                    onClick={(e) => toggleSelect(c.id, e)}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(c.id)}
+                      onChange={() => {}}
+                      className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-yellow-400 focus:ring-yellow-400 cursor-pointer"
+                    />
+                  </div>
+                  
+                  <div className="flex items-start gap-3 mb-3 pl-6">
                     {c.lead_grade ? (
                       <div className={`w-10 h-10 rounded-lg ${GRADE_COLORS[c.lead_grade]} flex items-center justify-center font-bold text-lg flex-shrink-0`}>
                         {c.lead_grade}
@@ -1181,9 +1587,183 @@ export default function SavedPage() {
                 </div>
               ))}
             </div>
+            </>
           )}
         </div>
       </main>
+
+      {/* Add/Edit Company Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowAddModal(false)}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between sticky top-0 bg-zinc-900">
+              <h2 className="text-lg font-semibold text-white">
+                {editingCompany ? 'Edit Company' : 'Add New Company'}
+              </h2>
+              <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-white text-xl">&times;</button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {formError && (
+                <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                  {formError}
+                </div>
+              )}
+
+              {/* Company Name */}
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Company Name *</label>
+                <input
+                  type="text"
+                  value={companyForm.company_name}
+                  onChange={e => setCompanyForm({ ...companyForm, company_name: e.target.value })}
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  placeholder="Acme Inc."
+                />
+              </div>
+
+              {/* Two columns */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Industry</label>
+                  <input
+                    type="text"
+                    value={companyForm.industry}
+                    onChange={e => setCompanyForm({ ...companyForm, industry: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                    placeholder="SaaS, FinTech, etc."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Country</label>
+                  <select
+                    value={companyForm.country}
+                    onChange={e => setCompanyForm({ ...companyForm, country: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  >
+                    <option value="">Select country</option>
+                    {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Website</label>
+                  <input
+                    type="text"
+                    value={companyForm.website}
+                    onChange={e => setCompanyForm({ ...companyForm, website: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                    placeholder="https://example.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Employee Count</label>
+                  <select
+                    value={companyForm.employee_count}
+                    onChange={e => setCompanyForm({ ...companyForm, employee_count: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  >
+                    <option value="">Select size</option>
+                    {COMPANY_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Funding Stage</label>
+                  <select
+                    value={companyForm.funding_stage}
+                    onChange={e => setCompanyForm({ ...companyForm, funding_stage: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                  >
+                    <option value="">Select stage</option>
+                    {FUNDING_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Funding Amount</label>
+                  <input
+                    type="text"
+                    value={companyForm.funding_amount}
+                    onChange={e => setCompanyForm({ ...companyForm, funding_amount: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                    placeholder="$10M"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Founded Year</label>
+                  <input
+                    type="number"
+                    value={companyForm.founded_year}
+                    onChange={e => setCompanyForm({ ...companyForm, founded_year: e.target.value })}
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                    placeholder="2020"
+                    min="1900"
+                    max="2025"
+                  />
+                </div>
+              </div>
+
+              {/* Primary Contact */}
+              <div className="pt-4 border-t border-zinc-800">
+                <h3 className="text-sm font-medium text-zinc-400 mb-3">Primary Contact</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Contact Name</label>
+                    <input
+                      type="text"
+                      value={companyForm.last_prospect_name}
+                      onChange={e => setCompanyForm({ ...companyForm, last_prospect_name: e.target.value })}
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                      placeholder="John Smith"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Contact Title</label>
+                    <input
+                      type="text"
+                      value={companyForm.last_prospect_title}
+                      onChange={e => setCompanyForm({ ...companyForm, last_prospect_title: e.target.value })}
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400"
+                      placeholder="VP of Engineering"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Notes</label>
+                <textarea
+                  value={companyForm.notes}
+                  onChange={e => setCompanyForm({ ...companyForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm focus:border-yellow-400 h-20 resize-none"
+                  placeholder="Any additional notes about this company..."
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-zinc-800 flex gap-2">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-lg text-sm hover:bg-zinc-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveCompany}
+                disabled={saving}
+                className="flex-1 px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-semibold hover:bg-yellow-300 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : editingCompany ? 'Update Company' : 'Add Company'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

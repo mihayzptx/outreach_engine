@@ -227,7 +227,9 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(defaultSettings)
   const [saved, setSaved] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'grading' | 'signals' | 'icp' | 'integrations'>('model')
+  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'grading' | 'signals' | 'icp' | 'integrations' | 'usage'>('model')
+  const [apiUsage, setApiUsage] = useState<any>(null)
+  const [loadingUsage, setLoadingUsage] = useState(false)
   const [newPhrase, setNewPhrase] = useState('')
   const [newOpener, setNewOpener] = useState('')
   const [newService, setNewService] = useState('')
@@ -336,6 +338,20 @@ export default function SettingsPage() {
     }
   }
 
+  const loadApiUsage = async () => {
+    setLoadingUsage(true)
+    try {
+      const res = await fetch('/api/usage')
+      const data = await res.json()
+      if (data.success) {
+        setApiUsage(data.usage)
+      }
+    } catch (e) {
+      console.error('Failed to load API usage:', e)
+    }
+    setLoadingUsage(false)
+  }
+
   // List management helpers
   const addItem = (field: keyof Settings, value: string, setter: (v: string) => void) => {
     if (value.trim()) {
@@ -409,11 +425,15 @@ export default function SettingsPage() {
               { id: 'grading', label: '📊 Grading' },
               { id: 'signals', label: '🔔 Signals' },
               { id: 'icp', label: '🎯 ICP' },
-              { id: 'integrations', label: '🔗 Integrations' }
+              { id: 'integrations', label: '🔗 Integrations' },
+              { id: 'usage', label: '📈 Usage' }
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => {
+                  setActiveTab(tab.id as any)
+                  if (tab.id === 'usage' && !apiUsage) loadApiUsage()
+                }}
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'text-yellow-400 border-yellow-400' : 'text-zinc-500 border-transparent hover:text-white'}`}
               >
                 {tab.label}
@@ -1556,6 +1576,214 @@ export default function SettingsPage() {
           {/* Integrations Tab */}
           {activeTab === 'integrations' && (
             <IntegrationsTab />
+          )}
+
+          {/* Usage Tab */}
+          {activeTab === 'usage' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-white">API Usage & Limits</h2>
+                <button 
+                  onClick={loadApiUsage}
+                  disabled={loadingUsage}
+                  className="px-3 py-1.5 bg-zinc-800 text-zinc-400 hover:text-white rounded-lg text-sm"
+                >
+                  {loadingUsage ? '⏳ Loading...' : '🔄 Refresh'}
+                </button>
+              </div>
+
+              {apiUsage ? (
+                <div className="grid md:grid-cols-2 gap-6">
+                  {/* Groq Usage */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <span className="text-2xl">⚡</span>
+                      <div>
+                        <h3 className="text-white font-semibold">Groq API</h3>
+                        <p className="text-xs text-zinc-500">LLM for message generation</p>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      {apiUsage.groq.lastKnown ? (
+                        <>
+                          <div>
+                            <div className="flex justify-between text-sm mb-1">
+                              <span className="text-zinc-400">Requests (per minute)</span>
+                              <span className={apiUsage.groq.status === 'ok' ? 'text-emerald-400' : apiUsage.groq.status === 'warning' ? 'text-yellow-400' : 'text-red-400'}>
+                                {apiUsage.groq.requests.toLocaleString()} / {apiUsage.groq.limit.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full transition-all ${apiUsage.groq.status === 'ok' ? 'bg-emerald-500' : apiUsage.groq.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                style={{ width: `${Math.min(100, apiUsage.groq.percentUsed)}%` }}
+                              />
+                            </div>
+                          </div>
+                          
+                          <div className="flex justify-between text-xs">
+                            <span className="text-zinc-500">Remaining: {apiUsage.groq.remaining.toLocaleString()}</span>
+                            {apiUsage.groq.resetsAt && (
+                              <span className="text-zinc-500">Resets: {apiUsage.groq.resetsAt}</span>
+                            )}
+                          </div>
+                          
+                          {apiUsage.groq.tokens > 0 && (
+                            <div className="pt-3 border-t border-zinc-800">
+                              <span className="text-xs text-zinc-500">Tokens used: {apiUsage.groq.tokens.toLocaleString()}</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-center py-4">
+                          <p className="text-zinc-500 text-sm">Rate limits tracked per-request</p>
+                          <p className="text-zinc-600 text-xs mt-1">Generate a message to see current limits</p>
+                        </div>
+                      )}
+                      
+                      {apiUsage.groq.note && (
+                        <p className="text-[10px] text-zinc-600 pt-2 border-t border-zinc-800">{apiUsage.groq.note}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tavily Usage */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <span className="text-2xl">🔍</span>
+                      <div>
+                        <h3 className="text-white font-semibold">Tavily API</h3>
+                        <p className="text-xs text-zinc-500">Web research & company search{apiUsage.tavily.plan && ` • ${apiUsage.tavily.plan}`}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-zinc-400">API Key Usage</span>
+                          <span className={apiUsage.tavily.status === 'ok' ? 'text-emerald-400' : apiUsage.tavily.status === 'warning' ? 'text-yellow-400' : 'text-red-400'}>
+                            {apiUsage.tavily.requests.toLocaleString()} / {apiUsage.tavily.limit.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full transition-all ${apiUsage.tavily.status === 'ok' ? 'bg-emerald-500' : apiUsage.tavily.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'}`}
+                            style={{ width: `${Math.min(100, apiUsage.tavily.percentUsed)}%` }}
+                          />
+                        </div>
+                      </div>
+                      
+                      {apiUsage.tavily.account && (
+                        <div>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-zinc-400">Account Usage</span>
+                            <span className="text-zinc-300">
+                              {apiUsage.tavily.account.plan_usage.toLocaleString()} / {apiUsage.tavily.account.plan_limit.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-blue-500 transition-all"
+                              style={{ width: `${Math.min(100, (apiUsage.tavily.account.plan_usage / apiUsage.tavily.account.plan_limit) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-between text-xs">
+                        <span className="text-zinc-500">Remaining: {apiUsage.tavily.remaining.toLocaleString()}</span>
+                        <span className="text-zinc-500">Resets: {new Date(apiUsage.tavily.resetsAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ollama (Local) */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <span className="text-2xl">🖥️</span>
+                      <div>
+                        <h3 className="text-white font-semibold">Ollama (Local)</h3>
+                        <p className="text-xs text-zinc-500">Free, unlimited local inference</p>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${apiUsage.ollama.available ? 'bg-emerald-500' : 'bg-zinc-600'}`}></span>
+                        <span className="text-sm text-zinc-400">{apiUsage.ollama.available ? 'Available' : 'Not connected'}</span>
+                      </div>
+                      <p className="text-xs text-zinc-500">
+                        Requests today: {apiUsage.ollama.requests.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-emerald-400">No usage limits!</p>
+                    </div>
+                  </div>
+
+                  {/* Tips */}
+                  <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-6">
+                    <h3 className="text-blue-400 font-semibold mb-3">💡 Tips to Save API Calls</h3>
+                    <ul className="space-y-2 text-sm text-zinc-400">
+                      <li>• Use Local Model (Ollama) for unlimited free generation</li>
+                      <li>• Disable Web Research when not needed</li>
+                      <li>• Use Rich Context instead of Web Research for saved companies</li>
+                      <li>• Batch research multiple companies at once</li>
+                    </ul>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-12 text-center">
+                  {loadingUsage ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-zinc-500">Loading usage data...</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <span className="text-4xl">📊</span>
+                      <p className="text-zinc-500">Click refresh to load API usage</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Limits Info */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-white font-semibold mb-4">📋 API Limits Reference</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                        <th className="pb-2">API</th>
+                        <th className="pb-2">Free Tier</th>
+                        <th className="pb-2">Reset Period</th>
+                        <th className="pb-2">Used For</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-zinc-400">
+                      <tr className="border-b border-zinc-800/50">
+                        <td className="py-2">Groq</td>
+                        <td>14,400 req/day</td>
+                        <td>Daily (midnight UTC)</td>
+                        <td>Message generation, quality checks</td>
+                      </tr>
+                      <tr className="border-b border-zinc-800/50">
+                        <td className="py-2">Tavily</td>
+                        <td>1,000 searches/mo</td>
+                        <td>Monthly</td>
+                        <td>Web research, company search</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2">Ollama</td>
+                        <td>Unlimited</td>
+                        <td>N/A</td>
+                        <td>Local message generation</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </main>

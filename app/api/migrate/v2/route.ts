@@ -159,6 +159,56 @@ export async function GET() {
       }
     }
 
+    // =============================================
+    // 6. API USAGE TRACKING TABLES
+    // =============================================
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS api_usage (
+          id SERIAL PRIMARY KEY,
+          api VARCHAR(50) NOT NULL,
+          period_key VARCHAR(20) NOT NULL,
+          requests INTEGER DEFAULT 0,
+          tokens INTEGER DEFAULT 0,
+          errors INTEGER DEFAULT 0,
+          total_cost DECIMAL(10,4) DEFAULT 0,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          UNIQUE(api, period_key)
+        )
+      `
+      results.push('✓ api_usage table created')
+    } catch (e: any) {
+      if (e.message.includes('already exists')) {
+        results.push('✓ api_usage table exists')
+      } else {
+        errors.push(`api_usage table: ${e.message}`)
+      }
+    }
+
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS api_usage_log (
+          id SERIAL PRIMARY KEY,
+          api VARCHAR(50) NOT NULL,
+          endpoint VARCHAR(255),
+          tokens INTEGER,
+          cost DECIMAL(10,6),
+          success BOOLEAN,
+          error TEXT,
+          duration_ms INTEGER,
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `
+      results.push('✓ api_usage_log table created')
+    } catch (e: any) {
+      if (e.message.includes('already exists')) {
+        results.push('✓ api_usage_log table exists')
+      } else {
+        errors.push(`api_usage_log table: ${e.message}`)
+      }
+    }
+
     // Verify all tables
     const tables = await sql`
       SELECT table_name 
