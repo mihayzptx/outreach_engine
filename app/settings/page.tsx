@@ -3,6 +3,18 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 
+interface ICPSettings {
+  industries: { name: string; weight: number; enabled: boolean }[]
+  companySizes: { min: number; max: number; label: string; weight: number; enabled: boolean }[]
+  fundingStages: { name: string; weight: number; enabled: boolean }[]
+  geographies: { name: string; weight: number; enabled: boolean }[]
+  companyAge: { min: number; max: number; weight: number }
+  buyingSignals: { name: string; points: number; enabled: boolean }[]
+  negativeSignals: { name: string; points: number; enabled: boolean }[]
+  targetTitles: { title: string; priority: 'primary' | 'secondary' }[]
+  techStack: { name: string; weight: number; enabled: boolean }[]
+}
+
 interface Settings {
   temperature: number
   maxTokens: number
@@ -36,6 +48,87 @@ interface Settings {
       enabled: boolean
     }[]
   }
+  icp: ICPSettings
+}
+
+const defaultICPSettings: ICPSettings = {
+  industries: [
+    { name: 'SaaS', weight: 10, enabled: true },
+    { name: 'Fintech', weight: 8, enabled: true },
+    { name: 'Healthcare Tech', weight: 7, enabled: true },
+    { name: 'E-commerce', weight: 6, enabled: true },
+    { name: 'AI/ML', weight: 9, enabled: true },
+    { name: 'Cybersecurity', weight: 8, enabled: true },
+    { name: 'Developer Tools', weight: 9, enabled: true },
+    { name: 'Data/Analytics', weight: 7, enabled: true },
+    { name: 'EdTech', weight: 5, enabled: false },
+    { name: 'MarTech', weight: 5, enabled: false }
+  ],
+  companySizes: [
+    { min: 1, max: 50, label: '1-50', weight: 3, enabled: true },
+    { min: 51, max: 200, label: '51-200', weight: 10, enabled: true },
+    { min: 201, max: 500, label: '201-500', weight: 8, enabled: true },
+    { min: 501, max: 1000, label: '501-1000', weight: 5, enabled: true },
+    { min: 1001, max: 100000, label: '1000+', weight: 2, enabled: false }
+  ],
+  fundingStages: [
+    { name: 'Seed', weight: 5, enabled: true },
+    { name: 'Series A', weight: 10, enabled: true },
+    { name: 'Series B', weight: 10, enabled: true },
+    { name: 'Series C', weight: 8, enabled: true },
+    { name: 'Series D+', weight: 5, enabled: true },
+    { name: 'Public', weight: 2, enabled: false },
+    { name: 'Bootstrapped', weight: 4, enabled: true }
+  ],
+  geographies: [
+    { name: 'United States', weight: 10, enabled: true },
+    { name: 'Canada', weight: 8, enabled: true },
+    { name: 'United Kingdom', weight: 7, enabled: true },
+    { name: 'Germany', weight: 6, enabled: true },
+    { name: 'Western Europe', weight: 6, enabled: true },
+    { name: 'Australia', weight: 5, enabled: true },
+    { name: 'Israel', weight: 7, enabled: true }
+  ],
+  companyAge: { min: 2, max: 15, weight: 5 },
+  buyingSignals: [
+    { name: 'Recently Funded', points: 20, enabled: true },
+    { name: 'Hiring DevOps/Platform Engineers', points: 15, enabled: true },
+    { name: 'New CTO/VP Engineering', points: 12, enabled: true },
+    { name: 'Post-Acquisition Integration', points: 15, enabled: true },
+    { name: 'Rapid Headcount Growth', points: 10, enabled: true },
+    { name: 'Cloud Migration Announced', points: 12, enabled: true },
+    { name: 'Infrastructure Problems Mentioned', points: 15, enabled: true },
+    { name: 'Scaling Challenges', points: 12, enabled: true },
+    { name: 'Security/Compliance Needs', points: 10, enabled: true }
+  ],
+  negativeSignals: [
+    { name: 'Large Internal DevOps Team', points: -15, enabled: true },
+    { name: 'Recent Layoffs', points: -10, enabled: true },
+    { name: 'Competitor Customer', points: -20, enabled: true },
+    { name: 'Government/Public Sector', points: -5, enabled: true },
+    { name: 'Consulting/Agency', points: -10, enabled: true }
+  ],
+  targetTitles: [
+    { title: 'CTO', priority: 'primary' },
+    { title: 'VP of Engineering', priority: 'primary' },
+    { title: 'VP of Infrastructure', priority: 'primary' },
+    { title: 'Head of Platform', priority: 'primary' },
+    { title: 'Director of Engineering', priority: 'secondary' },
+    { title: 'Director of DevOps', priority: 'secondary' },
+    { title: 'Engineering Manager', priority: 'secondary' }
+  ],
+  techStack: [
+    { name: 'AWS', weight: 8, enabled: true },
+    { name: 'GCP', weight: 8, enabled: true },
+    { name: 'Azure', weight: 7, enabled: true },
+    { name: 'Kubernetes', weight: 10, enabled: true },
+    { name: 'Terraform', weight: 9, enabled: true },
+    { name: 'Docker', weight: 7, enabled: true },
+    { name: 'Jenkins', weight: 6, enabled: true },
+    { name: 'GitHub Actions', weight: 7, enabled: true },
+    { name: 'GitLab CI', weight: 7, enabled: true },
+    { name: 'Datadog', weight: 6, enabled: true }
+  ]
 }
 
 const defaultSettings: Settings = {
@@ -126,19 +219,26 @@ const defaultSettings: Settings = {
       { category: 'product', label: 'Product', icon: '🚀', priority: 'medium', keywords: ['launch', 'announce', 'release', 'product', 'feature', 'platform', 'new version'], enabled: true },
       { category: 'tech_stack', label: 'Tech Stack', icon: '⚙️', priority: 'medium', keywords: ['aws', 'azure', 'gcp', 'kubernetes', 'k8s', 'terraform', 'docker', 'devops', 'ci/cd', 'jenkins'], enabled: true }
     ]
-  }
+  },
+  icp: defaultICPSettings
 }
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(defaultSettings)
   const [saved, setSaved] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'grading' | 'signals' | 'integrations'>('model')
+  const [activeTab, setActiveTab] = useState<'model' | 'prompts' | 'company' | 'examples' | 'grading' | 'signals' | 'icp' | 'integrations'>('model')
   const [newPhrase, setNewPhrase] = useState('')
   const [newOpener, setNewOpener] = useState('')
   const [newService, setNewService] = useState('')
   const [newSignal, setNewSignal] = useState('')
   const [newAbm, setNewAbm] = useState('')
+  const [newIndustry, setNewIndustry] = useState('')
+  const [newGeo, setNewGeo] = useState('')
+  const [newTitle, setNewTitle] = useState('')
+  const [newTech, setNewTech] = useState('')
+  const [newBuyingSignal, setNewBuyingSignal] = useState('')
+  const [newNegativeSignal, setNewNegativeSignal] = useState('')
 
   useEffect(() => {
     const stored = localStorage.getItem('llm-settings')
@@ -148,17 +248,85 @@ export default function SettingsPage() {
   }, [])
 
   const saveSettings = async () => {
+    // Save to localStorage first
     localStorage.setItem('llm-settings', JSON.stringify(settings))
-    // Also save to database
+    
+    // Save to database for cross-device sync
     try {
+      // Save full settings
       await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
+        body: JSON.stringify({ 
+          userId: 'default',
+          settings: {
+            llm: {
+              temperature: settings.temperature,
+              maxTokens: settings.maxTokens,
+              topP: settings.topP,
+              frequencyPenalty: settings.frequencyPenalty,
+              presencePenalty: settings.presencePenalty,
+              localModel: settings.localModel,
+              localEndpoint: settings.localEndpoint,
+              cloudModel: settings.cloudModel
+            },
+            prompts: {
+              systemPromptBase: settings.systemPromptBase,
+              bannedPhrases: settings.bannedPhrases,
+              goodOpeners: settings.goodOpeners
+            },
+            company: {
+              companyDescription: settings.companyDescription,
+              services: settings.services,
+              idealCustomerSignals: settings.idealCustomerSignals,
+              abmExamples: settings.abmExamples
+            },
+            grading: settings.gradingCriteria,
+            signals: settings.signalSettings,
+            icp: settings.icp
+          }
+        })
       })
-    } catch {}
+      
+      // Also save ICP separately for extension sync
+      await fetch('/api/settings/icp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: 'default',
+          icp: settings.icp 
+        })
+      })
+    } catch (e) {
+      console.error('Failed to sync settings to database:', e)
+    }
+    
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  const loadSettingsFromDB = async () => {
+    try {
+      const res = await fetch('/api/settings?userId=default')
+      const data = await res.json()
+      if (data.success && data.settings) {
+        // Merge DB settings with defaults
+        const dbSettings = data.settings
+        const merged = {
+          ...defaultSettings,
+          ...(dbSettings.llm || {}),
+          ...(dbSettings.prompts || {}),
+          ...(dbSettings.company || {}),
+          gradingCriteria: dbSettings.grading || defaultSettings.gradingCriteria,
+          signalSettings: dbSettings.signals || defaultSettings.signalSettings,
+          icp: dbSettings.icp || defaultSettings.icp
+        }
+        return merged
+      }
+    } catch (e) {
+      console.log('Could not load settings from DB:', e)
+    }
+    return null
   }
 
   const resetDefaults = () => {
@@ -177,6 +345,19 @@ export default function SettingsPage() {
   }
   const removeItem = (field: keyof Settings, index: number) => {
     setSettings({ ...settings, [field]: (settings[field] as string[]).filter((_, i) => i !== index) })
+  }
+
+  // Calculate max ICP score
+  const calculateICPMaxScore = () => {
+    const icp = settings.icp
+    const industryMax = Math.max(...icp.industries.filter(i => i.enabled).map(i => i.weight), 0)
+    const sizeMax = Math.max(...icp.companySizes.filter(s => s.enabled).map(s => s.weight), 0)
+    const fundingMax = Math.max(...icp.fundingStages.filter(f => f.enabled).map(f => f.weight), 0)
+    const geoMax = Math.max(...icp.geographies.filter(g => g.enabled).map(g => g.weight), 0)
+    const signalsTotal = icp.buyingSignals.filter(s => s.enabled).reduce((sum, s) => sum + s.points, 0)
+    const techTotal = icp.techStack.filter(t => t.enabled).reduce((sum, t) => sum + t.weight, 0)
+    
+    return industryMax + sizeMax + fundingMax + geoMax + signalsTotal + techTotal
   }
 
   return (
@@ -227,6 +408,7 @@ export default function SettingsPage() {
               { id: 'examples', label: '💡 Examples' },
               { id: 'grading', label: '📊 Grading' },
               { id: 'signals', label: '🔔 Signals' },
+              { id: 'icp', label: '🎯 ICP' },
               { id: 'integrations', label: '🔗 Integrations' }
             ].map(tab => (
               <button
@@ -867,6 +1049,506 @@ export default function SettingsPage() {
                     <p className="text-zinc-500 text-xs">Nice to know. Use for personalization.</p>
                   </div>
                 </div>
+              </div>
+            </>
+          )}
+
+          {/* ICP Tab */}
+          {activeTab === 'icp' && (
+            <>
+              {/* ICP Overview */}
+              <div className="bg-gradient-to-br from-yellow-400/10 to-yellow-600/5 border border-yellow-400/20 rounded-xl p-6 mb-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white mb-2">🎯 Ideal Customer Profile</h3>
+                    <p className="text-zinc-400 text-sm">Define your perfect customer. This profile is used to automatically score companies and prioritize your outreach.</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-bold text-yellow-400">{calculateICPMaxScore()}</div>
+                    <div className="text-xs text-zinc-500">Max Score</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Target Industries */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">🏷️ Target Industries</h3>
+                <div className="space-y-2">
+                  {settings.icp.industries.map((ind, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-800/50">
+                      <input
+                        type="checkbox"
+                        checked={ind.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.industries]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, industries: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className={`flex-1 text-sm ${ind.enabled ? 'text-white' : 'text-zinc-500'}`}>{ind.name}</span>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={ind.weight}
+                        onChange={(e) => {
+                          const updated = [...settings.icp.industries]
+                          updated[idx].weight = parseInt(e.target.value)
+                          setSettings({ ...settings, icp: { ...settings.icp, industries: updated } })
+                        }}
+                        disabled={!ind.enabled}
+                        className="w-24 accent-yellow-400"
+                      />
+                      <span className={`w-8 text-sm text-right ${ind.enabled ? 'text-yellow-400' : 'text-zinc-600'}`}>{ind.weight}</span>
+                      <button
+                        onClick={() => {
+                          const updated = settings.icp.industries.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, industries: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-sm"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="text"
+                    value={newIndustry}
+                    onChange={(e) => setNewIndustry(e.target.value)}
+                    placeholder="Add industry..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                    onKeyPress={(e) => e.key === 'Enter' && newIndustry.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, industries: [...settings.icp.industries, { name: newIndustry.trim(), weight: 5, enabled: true }] } }),
+                      setNewIndustry('')
+                    )}
+                  />
+                  <button
+                    onClick={() => newIndustry.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, industries: [...settings.icp.industries, { name: newIndustry.trim(), weight: 5, enabled: true }] } }),
+                      setNewIndustry('')
+                    )}
+                    className="px-4 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium"
+                  >+ Add</button>
+                </div>
+              </div>
+
+              {/* Company Size */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">👥 Company Size</h3>
+                <div className="space-y-2">
+                  {settings.icp.companySizes.map((size, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-800/50">
+                      <input
+                        type="checkbox"
+                        checked={size.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.companySizes]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, companySizes: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className={`w-24 text-sm ${size.enabled ? 'text-white' : 'text-zinc-500'}`}>{size.label} employees</span>
+                      <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className={`h-full ${size.enabled ? 'bg-yellow-400' : 'bg-zinc-700'}`} style={{ width: `${size.weight * 10}%` }}></div>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={size.weight}
+                        onChange={(e) => {
+                          const updated = [...settings.icp.companySizes]
+                          updated[idx].weight = parseInt(e.target.value)
+                          setSettings({ ...settings, icp: { ...settings.icp, companySizes: updated } })
+                        }}
+                        disabled={!size.enabled}
+                        className="w-24 accent-yellow-400"
+                      />
+                      <span className={`w-8 text-sm text-right ${size.enabled ? 'text-yellow-400' : 'text-zinc-600'}`}>{size.weight}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Funding Stage */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">💰 Funding Stage</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {settings.icp.fundingStages.map((stage, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        const updated = [...settings.icp.fundingStages]
+                        updated[idx].enabled = !updated[idx].enabled
+                        setSettings({ ...settings, icp: { ...settings.icp, fundingStages: updated } })
+                      }}
+                      className={`p-3 rounded-lg cursor-pointer border transition-all ${stage.enabled ? 'bg-yellow-400/10 border-yellow-400/50 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-500'}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-sm">{stage.name}</span>
+                        {stage.enabled && <span className="text-yellow-400 text-xs">+{stage.weight}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Geography */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">🌍 Target Geography</h3>
+                <div className="flex flex-wrap gap-2">
+                  {settings.icp.geographies.map((geo, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        const updated = [...settings.icp.geographies]
+                        updated[idx].enabled = !updated[idx].enabled
+                        setSettings({ ...settings, icp: { ...settings.icp, geographies: updated } })
+                      }}
+                      className={`px-3 py-2 rounded-lg cursor-pointer border transition-all flex items-center gap-2 ${geo.enabled ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' : 'bg-zinc-950 border-zinc-800 text-zinc-500'}`}
+                    >
+                      <span className="text-sm">{geo.name}</span>
+                      {geo.enabled && (
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={geo.weight}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const updated = [...settings.icp.geographies]
+                            updated[idx].weight = parseInt(e.target.value) || 1
+                            setSettings({ ...settings, icp: { ...settings.icp, geographies: updated } })
+                          }}
+                          className="w-10 px-1 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-xs text-center"
+                        />
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const updated = settings.icp.geographies.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, geographies: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-xs"
+                      >✕</button>
+                    </div>
+                  ))}
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      value={newGeo}
+                      onChange={(e) => setNewGeo(e.target.value)}
+                      placeholder="Add region..."
+                      className="w-32 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                      onKeyPress={(e) => e.key === 'Enter' && newGeo.trim() && (
+                        setSettings({ ...settings, icp: { ...settings.icp, geographies: [...settings.icp.geographies, { name: newGeo.trim(), weight: 5, enabled: true }] } }),
+                        setNewGeo('')
+                      )}
+                    />
+                    <button
+                      onClick={() => newGeo.trim() && (
+                        setSettings({ ...settings, icp: { ...settings.icp, geographies: [...settings.icp.geographies, { name: newGeo.trim(), weight: 5, enabled: true }] } }),
+                        setNewGeo('')
+                      )}
+                      className="px-2 py-1 bg-zinc-800 text-white rounded-lg text-sm"
+                    >+</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Buying Signals */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">📈 Buying Signals (Positive)</h3>
+                <div className="space-y-2">
+                  {settings.icp.buyingSignals.map((signal, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-800/50">
+                      <input
+                        type="checkbox"
+                        checked={signal.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.buyingSignals]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, buyingSignals: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className={`flex-1 text-sm ${signal.enabled ? 'text-white' : 'text-zinc-500'}`}>{signal.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-400 text-sm">+</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="50"
+                          value={signal.points}
+                          onChange={(e) => {
+                            const updated = [...settings.icp.buyingSignals]
+                            updated[idx].points = parseInt(e.target.value) || 1
+                            setSettings({ ...settings, icp: { ...settings.icp, buyingSignals: updated } })
+                          }}
+                          disabled={!signal.enabled}
+                          className="w-16 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-emerald-400 text-sm text-center"
+                        />
+                        <span className="text-zinc-500 text-xs">pts</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const updated = settings.icp.buyingSignals.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, buyingSignals: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-sm"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="text"
+                    value={newBuyingSignal}
+                    onChange={(e) => setNewBuyingSignal(e.target.value)}
+                    placeholder="Add buying signal..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                  />
+                  <button
+                    onClick={() => newBuyingSignal.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, buyingSignals: [...settings.icp.buyingSignals, { name: newBuyingSignal.trim(), points: 10, enabled: true }] } }),
+                      setNewBuyingSignal('')
+                    )}
+                    className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-medium"
+                  >+ Add</button>
+                </div>
+              </div>
+
+              {/* Negative Signals */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">📉 Negative Signals (Penalties)</h3>
+                <div className="space-y-2">
+                  {settings.icp.negativeSignals.map((signal, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-800/50">
+                      <input
+                        type="checkbox"
+                        checked={signal.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.negativeSignals]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, negativeSignals: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className={`flex-1 text-sm ${signal.enabled ? 'text-white' : 'text-zinc-500'}`}>{signal.name}</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="-50"
+                          max="-1"
+                          value={signal.points}
+                          onChange={(e) => {
+                            const updated = [...settings.icp.negativeSignals]
+                            updated[idx].points = parseInt(e.target.value) || -1
+                            setSettings({ ...settings, icp: { ...settings.icp, negativeSignals: updated } })
+                          }}
+                          disabled={!signal.enabled}
+                          className="w-16 px-2 py-1 bg-zinc-950 border border-zinc-800 rounded text-red-400 text-sm text-center"
+                        />
+                        <span className="text-zinc-500 text-xs">pts</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const updated = settings.icp.negativeSignals.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, negativeSignals: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-sm"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="text"
+                    value={newNegativeSignal}
+                    onChange={(e) => setNewNegativeSignal(e.target.value)}
+                    placeholder="Add negative signal..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                  />
+                  <button
+                    onClick={() => newNegativeSignal.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, negativeSignals: [...settings.icp.negativeSignals, { name: newNegativeSignal.trim(), points: -10, enabled: true }] } }),
+                      setNewNegativeSignal('')
+                    )}
+                    className="px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-medium"
+                  >+ Add</button>
+                </div>
+              </div>
+
+              {/* Target Titles */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">👔 Target Titles</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="text-xs text-yellow-400 uppercase mb-2">Primary Contacts</h4>
+                    <div className="space-y-1">
+                      {settings.icp.targetTitles.filter(t => t.priority === 'primary').map((title, idx) => (
+                        <div key={idx} className="flex items-center gap-2 px-3 py-2 bg-yellow-400/10 border border-yellow-400/30 rounded-lg">
+                          <span className="text-white text-sm flex-1">{title.title}</span>
+                          <button
+                            onClick={() => {
+                              const updated = settings.icp.targetTitles.filter(t => t.title !== title.title)
+                              setSettings({ ...settings, icp: { ...settings.icp, targetTitles: updated } })
+                            }}
+                            className="text-zinc-500 hover:text-red-400 text-sm"
+                          >✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="text-xs text-zinc-400 uppercase mb-2">Secondary Contacts</h4>
+                    <div className="space-y-1">
+                      {settings.icp.targetTitles.filter(t => t.priority === 'secondary').map((title, idx) => (
+                        <div key={idx} className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded-lg">
+                          <span className="text-zinc-300 text-sm flex-1">{title.title}</span>
+                          <button
+                            onClick={() => {
+                              const updated = settings.icp.targetTitles.filter(t => t.title !== title.title)
+                              setSettings({ ...settings, icp: { ...settings.icp, targetTitles: updated } })
+                            }}
+                            className="text-zinc-600 hover:text-red-400 text-sm"
+                          >✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <input
+                    type="text"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="Add title..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                  />
+                  <button
+                    onClick={() => newTitle.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, targetTitles: [...settings.icp.targetTitles, { title: newTitle.trim(), priority: 'primary' }] } }),
+                      setNewTitle('')
+                    )}
+                    className="px-3 py-2 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium"
+                  >+ Primary</button>
+                  <button
+                    onClick={() => newTitle.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, targetTitles: [...settings.icp.targetTitles, { title: newTitle.trim(), priority: 'secondary' }] } }),
+                      setNewTitle('')
+                    )}
+                    className="px-3 py-2 bg-zinc-700 text-white rounded-lg text-sm font-medium"
+                  >+ Secondary</button>
+                </div>
+              </div>
+
+              {/* Tech Stack */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">⚙️ Tech Stack Indicators</h3>
+                <div className="flex flex-wrap gap-2">
+                  {settings.icp.techStack.map((tech, idx) => (
+                    <div
+                      key={idx}
+                      className={`px-3 py-2 rounded-lg border flex items-center gap-2 ${tech.enabled ? 'bg-blue-500/10 border-blue-500/50 text-blue-400' : 'bg-zinc-950 border-zinc-800 text-zinc-500'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={tech.enabled}
+                        onChange={() => {
+                          const updated = [...settings.icp.techStack]
+                          updated[idx].enabled = !updated[idx].enabled
+                          setSettings({ ...settings, icp: { ...settings.icp, techStack: updated } })
+                        }}
+                        className="rounded border-zinc-600"
+                      />
+                      <span className="text-sm">{tech.name}</span>
+                      {tech.enabled && (
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={tech.weight}
+                          onChange={(e) => {
+                            const updated = [...settings.icp.techStack]
+                            updated[idx].weight = parseInt(e.target.value) || 1
+                            setSettings({ ...settings, icp: { ...settings.icp, techStack: updated } })
+                          }}
+                          className="w-10 px-1 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-xs text-center"
+                        />
+                      )}
+                      <button
+                        onClick={() => {
+                          const updated = settings.icp.techStack.filter((_, i) => i !== idx)
+                          setSettings({ ...settings, icp: { ...settings.icp, techStack: updated } })
+                        }}
+                        className="text-zinc-600 hover:text-red-400 text-xs"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="text"
+                    value={newTech}
+                    onChange={(e) => setNewTech(e.target.value)}
+                    placeholder="Add technology..."
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-white text-sm"
+                    onKeyPress={(e) => e.key === 'Enter' && newTech.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, techStack: [...settings.icp.techStack, { name: newTech.trim(), weight: 5, enabled: true }] } }),
+                      setNewTech('')
+                    )}
+                  />
+                  <button
+                    onClick={() => newTech.trim() && (
+                      setSettings({ ...settings, icp: { ...settings.icp, techStack: [...settings.icp.techStack, { name: newTech.trim(), weight: 5, enabled: true }] } }),
+                      setNewTech('')
+                    )}
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium"
+                  >+ Add</button>
+                </div>
+              </div>
+
+              {/* Scoring Preview */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h3 className="text-sm font-semibold text-white mb-4">📊 Score Calculation Preview</h3>
+                <div className="bg-zinc-950 rounded-lg p-4 font-mono text-xs">
+                  <div className="text-zinc-500 mb-2">// Max possible score breakdown:</div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Industries (best match):</span>
+                      <span className="text-yellow-400">+{Math.max(...settings.icp.industries.filter(i => i.enabled).map(i => i.weight), 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Company Size (best match):</span>
+                      <span className="text-yellow-400">+{Math.max(...settings.icp.companySizes.filter(s => s.enabled).map(s => s.weight), 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Funding Stage (best match):</span>
+                      <span className="text-yellow-400">+{Math.max(...settings.icp.fundingStages.filter(f => f.enabled).map(f => f.weight), 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Geography (best match):</span>
+                      <span className="text-yellow-400">+{Math.max(...settings.icp.geographies.filter(g => g.enabled).map(g => g.weight), 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Buying Signals (all):</span>
+                      <span className="text-emerald-400">+{settings.icp.buyingSignals.filter(s => s.enabled).reduce((sum, s) => sum + s.points, 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Tech Stack (all matches):</span>
+                      <span className="text-blue-400">+{settings.icp.techStack.filter(t => t.enabled).reduce((sum, t) => sum + t.weight, 0)}</span>
+                    </div>
+                    <div className="border-t border-zinc-800 my-2"></div>
+                    <div className="flex justify-between text-white">
+                      <span>Max Possible Score:</span>
+                      <span className="text-yellow-400 font-bold">{calculateICPMaxScore()}</span>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-zinc-500 text-xs mt-3">ICP scores are normalized to 0-100 scale. Companies scoring 70+ are considered high-fit.</p>
               </div>
             </>
           )}

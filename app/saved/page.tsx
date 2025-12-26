@@ -60,8 +60,13 @@ interface Company {
   signal_count?: number
   is_archived?: boolean
   archived_at?: string
+  icp_score?: number
+  icp_fit?: 'high' | 'medium' | 'low'
+  icp_breakdown?: any
+  icp_scored_at?: string
   extracted_info?: {
     description?: string
+    industry?: string
     founded?: string
     headquarters?: string
     employeeCount?: string
@@ -101,10 +106,114 @@ export default function SavedPage() {
   const [researchProgress, setResearchProgress] = useState({ current: 0, total: 0 })
   const [showArchived, setShowArchived] = useState(false)
   const [signalDebug, setSignalDebug] = useState<any>(null)
+  const [icpSettings, setIcpSettings] = useState<any>(null)
+  const [filterICP, setFilterICP] = useState('')
+  const [scoringAll, setScoringAll] = useState(false)
   const router = useRouter()
 
-  useEffect(() => { fetchCompanies() }, [])
-  useEffect(() => { applyFilters() }, [companies, searchQuery, filterGrade, sortBy, showArchived])
+  useEffect(() => { 
+    fetchCompanies() 
+    loadICPSettings()
+  }, [])
+  useEffect(() => { applyFilters() }, [companies, searchQuery, filterGrade, filterICP, sortBy, showArchived])
+
+  const loadICPSettings = () => {
+    try {
+      const stored = localStorage.getItem('llm-settings')
+      if (stored) {
+        const settings = JSON.parse(stored)
+        if (settings.icp) {
+          setIcpSettings(settings.icp)
+        }
+      }
+    } catch {}
+  }
+
+  const calculateICPScore = (company: Company): { score: number; fit: 'high' | 'medium' | 'low' } => {
+    if (!icpSettings) return { score: 0, fit: 'low' }
+    
+    let score = 0
+    let maxScore = 0
+    
+    // Industry match
+    const industryMax = Math.max(...(icpSettings.industries?.filter((i: any) => i.enabled).map((i: any) => i.weight) || [0]), 0)
+    maxScore += industryMax
+    const companyIndustry = (company.industry || company.extracted_info?.industry || '').toLowerCase()
+    for (const ind of (icpSettings.industries || []).filter((i: any) => i.enabled)) {
+      if (companyIndustry.includes(ind.name.toLowerCase())) {
+        score += ind.weight
+        break
+      }
+    }
+    
+    // Company size match
+    const sizeMax = Math.max(...(icpSettings.companySizes?.filter((s: any) => s.enabled).map((s: any) => s.weight) || [0]), 0)
+    maxScore += sizeMax
+    const empStr = company.employee_count || company.extracted_info?.employeeCount || ''
+    const empMatch = empStr.match(/(\d+)/g)
+    if (empMatch) {
+      const empCount = parseInt(empMatch[0])
+      for (const size of (icpSettings.companySizes || []).filter((s: any) => s.enabled)) {
+        if (empCount >= size.min && empCount <= size.max) {
+          score += size.weight
+          break
+        }
+      }
+    }
+    
+    // Funding stage match
+    const fundingMax = Math.max(...(icpSettings.fundingStages?.filter((f: any) => f.enabled).map((f: any) => f.weight) || [0]), 0)
+    maxScore += fundingMax
+    const funding = (company.funding_stage || company.extracted_info?.lastRound || '').toLowerCase()
+    for (const stage of (icpSettings.fundingStages || []).filter((f: any) => f.enabled)) {
+      if (funding.includes(stage.name.toLowerCase())) {
+        score += stage.weight
+        break
+      }
+    }
+    
+    // Geography match
+    const geoMax = Math.max(...(icpSettings.geographies?.filter((g: any) => g.enabled).map((g: any) => g.weight) || [0]), 0)
+    maxScore += geoMax
+    const location = (company.country || company.extracted_info?.headquarters || '').toLowerCase()
+    for (const geo of (icpSettings.geographies || []).filter((g: any) => g.enabled)) {
+      if (location.includes(geo.name.toLowerCase())) {
+        score += geo.weight
+        break
+      }
+    }
+    
+    // Buying signals
+    const signalsMax = (icpSettings.buyingSignals || []).filter((s: any) => s.enabled).reduce((sum: number, s: any) => sum + s.points, 0)
+    maxScore += signalsMax
+    const signals = getSignals(company)
+    const signalText = signals.map((s: any) => (s.detail || s.content || s.label || '').toLowerCase()).join(' ')
+    for (const signal of (icpSettings.buyingSignals || []).filter((s: any) => s.enabled)) {
+      const words = signal.name.toLowerCase().split(' ')
+      if (words.some((w: string) => signalText.includes(w))) {
+        score += signal.points
+      }
+    }
+    
+    // Tech stack
+    const techMax = (icpSettings.techStack || []).filter((t: any) => t.enabled).reduce((sum: number, t: any) => sum + t.weight, 0)
+    maxScore += techMax
+    const techStack = (company.extracted_info?.techStack || []).map((t: string) => t.toLowerCase()).join(' ')
+    for (const tech of (icpSettings.techStack || []).filter((t: any) => t.enabled)) {
+      if (techStack.includes(tech.name.toLowerCase())) {
+        score += tech.weight
+      }
+    }
+    
+    // Normalize to 0-100
+    const normalizedScore = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
+    
+    let fit: 'high' | 'medium' | 'low' = 'low'
+    if (normalizedScore >= 70) fit = 'high'
+    else if (normalizedScore >= 40) fit = 'medium'
+    
+    return { score: normalizedScore, fit }
+  }
 
   const fetchCompanies = async () => {
     try {
@@ -131,6 +240,14 @@ export default function SavedPage() {
     }
     if (filterGrade) result = result.filter(c => c.lead_grade === filterGrade)
     
+    // ICP filter
+    if (filterICP && icpSettings) {
+      result = result.filter(c => {
+        const { fit } = calculateICPScore(c)
+        return fit === filterICP
+      })
+    }
+    
     result.sort((a, b) => {
       switch (sortBy) {
         case 'grade_desc':
@@ -139,6 +256,11 @@ export default function SavedPage() {
         case 'signals_desc': return (b.signal_count || 0) - (a.signal_count || 0)
         case 'name_asc': return a.company_name.localeCompare(b.company_name)
         case 'recent': return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        case 'icp_desc':
+          if (!icpSettings) return 0
+          const scoreA = calculateICPScore(a).score
+          const scoreB = calculateICPScore(b).score
+          return scoreB - scoreA
         default: return 0
       }
     })
@@ -292,6 +414,48 @@ export default function SavedPage() {
     
     await fetchCompanies()
     setResearchingAll(false)
+  }
+
+  const rescoreAllCompanies = async () => {
+    if (!icpSettings) return
+    
+    const toScore = companies.filter(c => !c.is_archived)
+    if (toScore.length === 0) return
+    
+    setScoringAll(true)
+    
+    try {
+      // Batch score all companies
+      const res = await fetch('/api/icp/score', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companies: toScore.map(c => ({
+            id: c.id,
+            company_name: c.company_name,
+            industry: c.industry,
+            employee_count: c.employee_count,
+            funding_stage: c.funding_stage,
+            country: c.country,
+            signals: getSignals(c).map((s: any) => s.detail || s.category || ''),
+            extracted_info: c.extracted_info
+          })),
+          icpSettings,
+          saveToDb: true
+        })
+      })
+      
+      const data = await res.json()
+      console.log('ICP Scoring complete:', data)
+      
+      // Refresh companies to get updated scores
+      await fetchCompanies()
+      
+    } catch (e) {
+      console.error('ICP scoring failed:', e)
+    }
+    
+    setScoringAll(false)
   }
 
   const updateCompany = async (id: number, updates: any) => {
@@ -904,12 +1068,30 @@ export default function SavedPage() {
                   {researchingAll ? `🔄 ${researchProgress.current}/${researchProgress.total}` : '🔍 Research All'}
                 </button>
               )}
+              {companies.length > 0 && !showArchived && icpSettings && (
+                <button 
+                  onClick={rescoreAllCompanies} 
+                  disabled={scoringAll}
+                  className="px-3 py-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-sm hover:bg-emerald-500/30 disabled:opacity-50"
+                >
+                  {scoringAll ? '🔄 Scoring...' : '🎯 Re-score ICP'}
+                </button>
+              )}
               <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
                 <option value="">All Grades</option>
                 {['A','B','C','D','E'].map(g => <option key={g} value={g}>Grade {g}</option>)}
               </select>
+              {icpSettings && (
+                <select value={filterICP} onChange={e => setFilterICP(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
+                  <option value="">All ICP</option>
+                  <option value="high">🟢 High Fit</option>
+                  <option value="medium">🟡 Medium Fit</option>
+                  <option value="low">🔴 Low Fit</option>
+                </select>
+              )}
               <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white">
                 <option value="grade_desc">Best Grade</option>
+                <option value="icp_desc">Best ICP Fit</option>
                 <option value="signals_desc">Most Signals</option>
                 <option value="name_asc">A-Z</option>
                 <option value="recent">Recent</option>
@@ -959,6 +1141,22 @@ export default function SavedPage() {
                       </div>
                       <p className="text-zinc-500 text-sm truncate">{c.last_prospect_name}</p>
                     </div>
+                    {/* ICP Score Badge */}
+                    {(c.icp_score !== undefined || icpSettings) && (() => {
+                      // Prefer database score, fall back to calculated
+                      const score = c.icp_score ?? (icpSettings ? calculateICPScore(c).score : 0)
+                      const fit = c.icp_fit ?? (score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low')
+                      const fitColors = {
+                        high: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+                        medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+                        low: 'bg-zinc-700/50 text-zinc-400 border-zinc-600'
+                      }
+                      return (
+                        <div className={`px-2 py-1 rounded border text-xs font-medium flex-shrink-0 ${fitColors[fit as 'high' | 'medium' | 'low']}`}>
+                          {score}%
+                        </div>
+                      )
+                    })()}
                   </div>
                   
                   <div className="flex flex-wrap gap-1 mb-3">

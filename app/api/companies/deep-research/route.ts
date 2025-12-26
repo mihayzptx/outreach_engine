@@ -251,7 +251,11 @@ Extract and return a JSON object with:
   }
 }
 
-Be specific and factual. If information isn't found, use 'unknown' or empty arrays.
+IMPORTANT RULES:
+1. For keyPeople, ONLY include C-level executives (CEO, CTO, COO, CFO), Founders, VPs, and Directors. Do NOT include individual contributors like engineers, QA, analysts, etc.
+2. Order keyPeople by seniority: CEO/Founder first, then CTO/COO, then VPs, then Directors.
+3. For headquarters, provide city and country/state - NOT follower counts or employee numbers.
+4. Be specific and factual. If information isn't found, use 'unknown' or empty arrays.
 Return ONLY the JSON object.`
 
     const analysisResult = await analyzeWithLLM(
