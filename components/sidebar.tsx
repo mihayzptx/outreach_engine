@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { APP_CONFIG } from '@/lib/constants'
 
 interface SidebarProps {
   isOpen: boolean
@@ -10,6 +11,12 @@ interface SidebarProps {
     campaigns?: number
     saved?: number
   }
+  user?: {
+    name: string
+    email: string
+    role: string
+  } | null
+  onLogout?: () => void
 }
 
 const NAV_ITEMS = [
@@ -22,7 +29,7 @@ const NAV_ITEMS = [
   { href: '/settings', icon: '⚙️', label: 'Settings' },
 ]
 
-export default function Sidebar({ isOpen, onClose, counts = {} }: SidebarProps) {
+export default function Sidebar({ isOpen, onClose, counts = {}, user, onLogout }: SidebarProps) {
   const pathname = usePathname()
 
   const isActive = (href: string) => {
@@ -46,11 +53,11 @@ export default function Sidebar({ isOpen, onClose, counts = {} }: SidebarProps) 
         <div className="p-4 border-b border-zinc-800">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center">
-              <span className="text-zinc-900 font-black text-sm">TS</span>
+              <span className="text-zinc-900 font-black text-sm">{APP_CONFIG.companyInitials}</span>
             </div>
             <div>
-              <h2 className="font-bold text-white text-sm">Tech-stack.io</h2>
-              <p className="text-[10px] text-zinc-500">Outreach Engine</p>
+              <h2 className="font-bold text-white text-sm">{APP_CONFIG.companyName}</h2>
+              <p className="text-[10px] text-zinc-500">{APP_CONFIG.appName}</p>
             </div>
           </div>
         </div>
@@ -85,6 +92,42 @@ export default function Sidebar({ isOpen, onClose, counts = {} }: SidebarProps) 
             )
           })}
         </nav>
+        
+        {/* User section */}
+        <div className="p-3 border-t border-zinc-800 space-y-2">
+          {user?.role === 'admin' && (
+            <Link 
+              href="/admin" 
+              onClick={onClose}
+              className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors"
+            >
+              <span>👥</span> Admin
+            </Link>
+          )}
+          {user ? (
+            <div className="flex items-center justify-between px-3 py-2 bg-zinc-800/50 rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-yellow-400/20 flex items-center justify-center text-xs text-yellow-400 font-medium">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-xs text-zinc-300 truncate max-w-[80px]">{user.name}</span>
+              </div>
+              {onLogout && (
+                <button onClick={onLogout} className="text-[10px] text-zinc-500 hover:text-white transition-colors">
+                  Logout
+                </button>
+              )}
+            </div>
+          ) : (
+            <Link 
+              href="/login" 
+              onClick={onClose}
+              className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors"
+            >
+              <span>🔑</span> Login
+            </Link>
+          )}
+        </div>
       </aside>
     </>
   )

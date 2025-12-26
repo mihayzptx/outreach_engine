@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect, Suspense, useRef } from 'react'
-import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import EmailModal from '@/components/EmailModal'
+import Sidebar from '@/components/sidebar'
+import Link from 'next/link'
 
 const INDUSTRIES = [
   'SaaS / Software', 'FinTech', 'Healthcare Tech', 'E-commerce', 'Manufacturing',
@@ -438,70 +439,14 @@ function HomeContent() {
         </div>
       )}
 
-      {/* Mobile overlay */}
-      {sidebarOpen && <div className="fixed inset-0 bg-black/60 z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
-
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-56 bg-zinc-900 border-r border-zinc-800 z-30 h-full flex flex-col transition-transform`}>
-        <div className="p-4 border-b border-zinc-800">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center">
-              <span className="text-zinc-900 font-black text-sm">TS</span>
-            </div>
-            <div>
-              <h2 className="font-bold text-white text-sm">Tech-stack.io</h2>
-              <p className="text-[10px] text-zinc-500">Outreach Engine</p>
-            </div>
-          </div>
-        </div>
-        
-        <nav className="flex-1 p-3 space-y-1">
-          <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">
-            <span>✨</span> Generate
-          </button>
-          <Link href="/bulk" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>📦</span> Bulk
-          </Link>
-          <Link href="/campaigns" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>🎯</span> Campaigns
-            {campaigns.length > 0 && <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded">{campaigns.length}</span>}
-          </Link>
-          <Link href="/saved" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>💾</span> Saved
-            {savedCompanies.length > 0 && <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded">{savedCompanies.length}</span>}
-          </Link>
-          <Link href="/history" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>📊</span> History
-          </Link>
-          <Link href="/settings" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>⚙️</span> Settings
-          </Link>
-        </nav>
-        
-        {/* User section */}
-        <div className="p-3 border-t border-zinc-800 space-y-2">
-          {user?.role === 'admin' && (
-            <Link href="/admin" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-              <span>👥</span> Admin
-            </Link>
-          )}
-          {user ? (
-            <div className="flex items-center justify-between px-3 py-2 bg-zinc-800/50 rounded-lg">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-yellow-400/20 flex items-center justify-center text-xs text-yellow-400 font-medium">
-                  {user.name.charAt(0).toUpperCase()}
-                </div>
-                <span className="text-xs text-zinc-300 truncate max-w-[80px]">{user.name}</span>
-              </div>
-              <button onClick={logout} className="text-[10px] text-zinc-500 hover:text-white transition-colors">Logout</button>
-            </div>
-          ) : (
-            <Link href="/login" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-              <span>🔑</span> Login
-            </Link>
-          )}
-        </div>
-      </aside>
+      <Sidebar 
+        isOpen={sidebarOpen} 
+        onClose={() => setSidebarOpen(false)}
+        user={user}
+        onLogout={logout}
+        counts={{ saved: savedCompanies.length, campaigns: campaigns.length }}
+      />
 
       {/* Main */}
       <main className="flex-1 overflow-auto">

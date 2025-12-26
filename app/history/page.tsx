@@ -1,21 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
-
-interface Message {
-  id: number
-  company: string
-  prospect_name: string
-  prospect_title: string
-  industry: string
-  message_type: string
-  generated_message: string
-  quality_score: number
-  created_at: string
-  user_name?: string
-  user_id?: number
-}
+import Sidebar from '@/components/sidebar'
+import type { Message } from '@/lib/types'
 
 interface GroupedHistory {
   [company: string]: Message[]
@@ -28,13 +15,12 @@ export default function HistoryPage() {
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null)
   const [search, setSearch] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [user, setUser] = useState<{role: string} | null>(null)
+  const [user, setUser] = useState<{name: string, email: string, role: string} | null>(null)
 
   useEffect(() => {
     fetch('/api/history').then(r => r.json()).then(d => {
       const msgs = d.messages || []
       setMessages(msgs)
-      // Group by company
       const groups: GroupedHistory = {}
       msgs.forEach((m: Message) => {
         const key = m.company || 'Unknown'
@@ -45,6 +31,11 @@ export default function HistoryPage() {
     }).catch(() => {})
     fetch('/api/auth/me').then(r => r.json()).then(d => { if (d.user) setUser(d.user) }).catch(() => {})
   }, [])
+
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    window.location.href = '/login'
+  }
 
   const filteredCompanies = Object.keys(grouped).filter(company =>
     company.toLowerCase().includes(search.toLowerCase()) ||
@@ -63,23 +54,12 @@ export default function HistoryPage() {
 
   return (
     <div className="flex h-screen bg-zinc-950">
-      {sidebarOpen && <div className="fixed inset-0 bg-black/60 z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
-
-      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-56 bg-zinc-900 border-r border-zinc-800 z-30 h-full flex flex-col transition-transform`}>
-        <div className="p-4 border-b border-zinc-800">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center"><span className="text-zinc-900 font-black text-sm">TS</span></div>
-            <div><h2 className="font-bold text-white text-sm">Tech-stack.io</h2><p className="text-[10px] text-zinc-500">Outreach Engine</p></div>
-          </div>
-        </div>
-        <nav className="flex-1 p-3 space-y-1">
-          <Link href="/" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">✨ Generate</Link>
-          <Link href="/bulk" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">📦 Bulk</Link>
-          <Link href="/saved" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">💾 Saved</Link>
-          <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">📊 History</button>
-          <Link href="/settings" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm">⚙️ Settings</Link>
-        </nav>
-      </aside>
+      <Sidebar 
+        isOpen={sidebarOpen} 
+        onClose={() => setSidebarOpen(false)}
+        user={user}
+        onLogout={logout}
+      />
 
       <main className="flex-1 overflow-auto">
         <header className="bg-zinc-900/80 backdrop-blur border-b border-zinc-800 px-4 lg:px-6 py-3 sticky top-0 z-10">
@@ -141,22 +121,19 @@ export default function HistoryPage() {
                             <div className="flex items-center gap-2">
                               <span className="text-white text-sm font-medium">{msg.prospect_name}</span>
                               <span className="text-zinc-500 text-xs">{msg.prospect_title}</span>
-                           
-                           
                             </div>
                             <div className="flex items-center gap-2">
                               {isManagerOrAdmin && msg.user_name && (
                                 <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded">{msg.user_name}</span>
                               )}
                               <span className={`text-xs px-2 py-0.5 rounded ${
-                                msg.quality_score >= 80 ? 'bg-emerald-500/20 text-emerald-400' :
-                                msg.quality_score >= 60 ? 'bg-yellow-500/20 text-yellow-400' :
+                                (msg.quality_score || 0) >= 80 ? 'bg-emerald-500/20 text-emerald-400' :
+                                (msg.quality_score || 0) >= 60 ? 'bg-yellow-500/20 text-yellow-400' :
                                 'bg-red-500/20 text-red-400'
                               }`}>{msg.quality_score || 0}</span>
                             </div>
                           </div>
                           <p className="text-zinc-400 text-sm line-clamp-2">{msg.generated_message}</p>
-                          
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded">{msg.message_type}</span>
                             <span className="text-[10px] text-zinc-600">{formatDate(msg.created_at)}</span>
@@ -188,8 +165,8 @@ export default function HistoryPage() {
                 <span className="text-xs px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">{selectedMessage.message_type}</span>
                 <span className="text-xs px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">{selectedMessage.industry}</span>
                 <span className={`text-xs px-2 py-0.5 rounded ${
-                  selectedMessage.quality_score >= 80 ? 'bg-emerald-500/20 text-emerald-400' :
-                  selectedMessage.quality_score >= 60 ? 'bg-yellow-500/20 text-yellow-400' :
+                  (selectedMessage.quality_score || 0) >= 80 ? 'bg-emerald-500/20 text-emerald-400' :
+                  (selectedMessage.quality_score || 0) >= 60 ? 'bg-yellow-500/20 text-yellow-400' :
                   'bg-red-500/20 text-red-400'
                 }`}>Score: {selectedMessage.quality_score || 0}</span>
                 {isManagerOrAdmin && selectedMessage.user_name && (
@@ -202,14 +179,11 @@ export default function HistoryPage() {
               <div className="flex items-center justify-between">
                 <span className="text-xs text-zinc-600">{formatDate(selectedMessage.created_at)}</span>
                 <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(selectedMessage.generated_message)
-                  }}
+                  onClick={() => navigator.clipboard.writeText(selectedMessage.generated_message)}
                   className="px-3 py-1.5 bg-yellow-400 text-zinc-900 rounded-lg text-sm font-medium hover:bg-yellow-300"
                 >
                   Copy Message
                 </button>
-                
               </div>
             </div>
           </div>

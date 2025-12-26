@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import Sidebar from '@/components/sidebar'
 import { useRouter } from 'next/navigation'
 
 const LABEL_COLORS: Record<string, string> = {
@@ -109,6 +109,7 @@ export default function SavedPage() {
   const [icpSettings, setIcpSettings] = useState<any>(null)
   const [filterICP, setFilterICP] = useState('')
   const [scoringAll, setScoringAll] = useState(false)
+  const [user, setUser] = useState<{name: string, email: string, role: string} | null>(null)
   
   // Multi-select for bulk actions
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -139,7 +140,14 @@ export default function SavedPage() {
   useEffect(() => { 
     fetchCompanies() 
     loadICPSettings()
+    fetch('/api/auth/me').then(r => r.json()).then(d => { if (d.user) setUser(d.user) }).catch(() => {})
   }, [])
+
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    window.location.href = '/login'
+  }
+
   useEffect(() => { applyFilters() }, [companies, searchQuery, filterGrade, filterICP, sortBy, showArchived])
 
   const loadICPSettings = () => {
@@ -1277,44 +1285,13 @@ export default function SavedPage() {
       )}
 
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static w-56 bg-zinc-900 border-r border-zinc-800 z-30 h-full flex flex-col transition-transform`}>
-        <div className="p-4 border-b border-zinc-800">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center">
-              <span className="text-zinc-900 font-black text-sm">TS</span>
-            </div>
-            <div>
-              <h2 className="font-bold text-white text-sm">Tech-stack.io</h2>
-              <p className="text-[10px] text-zinc-500">Outreach Engine</p>
-            </div>
-          </div>
-        </div>
-        
-        <nav className="flex-1 p-3 space-y-1">
-          <Link href="/" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>✨</span> Generate
-          </Link>
-          <Link href="/bulk" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>📦</span> Bulk
-          </Link>
-          <Link href="/campaigns" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>🎯</span> Campaigns
-          </Link>
-          <Link href="/prospect" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>🔍</span> Prospect
-          </Link>
-          <button className="w-full flex items-center gap-2 px-3 py-2 bg-yellow-400/10 text-yellow-400 rounded-lg text-sm font-medium border border-yellow-400/20">
-            <span>💾</span> Saved
-            <span className="ml-auto text-[10px] px-1.5 py-0.5 bg-yellow-400/20 rounded">{companies.length}</span>
-          </button>
-          <Link href="/history" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>📊</span> History
-          </Link>
-          <Link href="/settings" className="w-full flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg text-sm transition-colors">
-            <span>⚙️</span> Settings
-          </Link>
-        </nav>
-      </aside>
+      <Sidebar 
+        isOpen={sidebarOpen} 
+        onClose={() => setSidebarOpen(false)}
+        user={user}
+        onLogout={logout}
+        counts={{ saved: companies.length }}
+      />
 
       {/* Main */}
       <main className="flex-1 overflow-auto">
