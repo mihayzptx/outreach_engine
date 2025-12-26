@@ -3,6 +3,7 @@ import { Ollama } from 'ollama'
 import { NextResponse } from 'next/server'
 import { sql } from '@vercel/postgres'
 import { tavily } from '@tavily/core'
+import { buildOutreachContext, formatContextForPrompt, determineSeniority, getSeniorityGuidance } from '../../../lib/outreach-context'
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
     prospectName, 
     prospectTitle, 
     company, 
+    companyId,  // NEW: company ID for rich context
     industry, 
     context, 
     messageType, 
@@ -112,17 +114,36 @@ export async function POST(request: Request) {
     sources,
     useLocal,
     useWebResearch,
+    useRichContext,  // NEW: flag to use full context
     adjustment,
     userId,
     customInstructions,
     campaignId
   } = await request.json()
 
-  console.log(useLocal ? '🏠 LOCAL' : '☁️ CLOUD', useWebResearch ? '+ 🔍 RESEARCH' : '', campaignId ? `📋 Campaign: ${campaignId}` : '')
+  console.log(useLocal ? '🏠 LOCAL' : '☁️ CLOUD', useWebResearch ? '+ 🔍 RESEARCH' : '', useRichContext ? '+ 📊 RICH CONTEXT' : '', campaignId ? `📋 Campaign: ${campaignId}` : '')
 
   // Get settings from database
   const settings = await getSettings()
   console.log(`📊 Using model: ${useLocal ? settings.localModel : settings.cloudModel}, temp: ${settings.temperature}`)
+
+  // Build rich context if company ID provided and flag enabled
+  let richContext = ''
+  let outreachContext = null
+  
+  if (useRichContext && companyId) {
+    try {
+      outreachContext = await buildOutreachContext(companyId, prospectName, prospectTitle, settings)
+      richContext = formatContextForPrompt(outreachContext)
+      console.log(`📊 Rich context loaded: ICP ${outreachContext.icpFit.score}%, ${outreachContext.research.recentSignals.length} signals`)
+    } catch (e) {
+      console.error('Failed to build rich context:', e)
+    }
+  }
+
+  // Determine seniority for messaging adjustments
+  const seniority = determineSeniority(prospectTitle)
+  const seniorityGuidance = getSeniorityGuidance(seniority)
 
   const lengthInstructions: Record<string, string> = {
     short: '2-3 sentences MAXIMUM. Under 200 characters ideal.',
@@ -138,6 +159,10 @@ export async function POST(request: Request) {
     direct: 'Get to the point fast. No fluff. Blunt.',
     enthusiastic: 'High energy. Excited about their work.'
   }
+
+  // Auto-adjust based on seniority if not specified
+  const effectiveLength = messageLength || (seniority === 'C-level' ? 'short' : 'medium')
+  const effectiveTone = toneOfVoice || (seniority === 'C-level' ? 'warm' : 'friendly')
 
   // Web research
   let researchContext = ''
@@ -201,6 +226,11 @@ export async function POST(request: Request) {
   // Build services list
   const servicesText = settings.services.map((s: string) => `- ${s}`).join('\n')
 
+  // Build relevant services if we have rich context
+  const relevantServicesText = outreachContext?.icpFit.relevantServices.length 
+    ? `## MOST RELEVANT SERVICES FOR THIS PROSPECT:\n${outreachContext.icpFit.relevantServices.map((s: string) => `- ${s}`).join('\n')}\n\n`
+    : ''
+
   // Build system prompt using settings
   let systemPrompt = `${settings.systemPromptBase}
 
@@ -210,12 +240,15 @@ ${settings.companyDescription}
 ## SERVICES (know these but don't list them in messages):
 ${servicesText}
 
-## IDEAL CUSTOMER SIGNALS:
+${relevantServicesText}## IDEAL CUSTOMER SIGNALS:
 ${settings.idealCustomerSignals.map((s: string) => `- ${s}`).join('\n')}
 
+## SENIORITY-BASED APPROACH (THIS PROSPECT: ${seniority})
+${seniorityGuidance}
+
 ## CRITICAL RULES - FOLLOW EXACTLY:
-1. ${lengthInstructions[messageLength] || lengthInstructions.medium}
-2. ${toneInstructions[toneOfVoice] || toneInstructions.professional}
+1. ${lengthInstructions[effectiveLength] || lengthInstructions.medium}
+2. ${toneInstructions[effectiveTone] || toneInstructions.professional}
 3. Lead with THEIR specific situation, not who you are
 4. MUST include "${prospectName.split(' ')[0]}" (first name) in the greeting
 5. MUST reference "${company}" by name at least once in the message
@@ -339,13 +372,16 @@ ${researchContext}
 
 Remember: Start with "${prospectName.split(' ')[0]}," and mention "${company}" in the message.`
   } else {
+    // Include rich context if available
+    const richContextSection = richContext ? `\n${richContext}\n` : ''
+    
     userPrompt = `Write a ${messageType} message for:
 
 PROSPECT: ${prospectName} (use first name "${prospectName.split(' ')[0]}" in greeting)
 TITLE: ${prospectTitle}
 COMPANY: ${company} (MUST mention by name)
 INDUSTRY: ${industry}
-
+${richContextSection}
 CONTEXT/REASON FOR OUTREACH:
 ${context}
 ${researchContext}
