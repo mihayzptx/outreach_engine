@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 
-export default function GmailCallbackPage() {
+function GmailCallbackContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [status, setStatus] = useState('Processing...')
@@ -79,5 +79,24 @@ export default function GmailCallbackPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function GmailCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="bg-zinc-900 rounded-xl p-8 max-w-md w-full text-center">
+          <div className="text-4xl mb-4">📧</div>
+          <h1 className="text-xl font-bold text-white mb-4">Gmail Connection</h1>
+          <div className="flex items-center justify-center gap-2">
+            <div className="w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+            <p className="text-zinc-400">Loading...</p>
+          </div>
+        </div>
+      </div>
+    }>
+      <GmailCallbackContent />
+    </Suspense>
   )
 }
