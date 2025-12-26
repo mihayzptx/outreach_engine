@@ -102,7 +102,7 @@ export async function POST(request: Request) {
     })
   }
 
-  const prompt = `Analyze this company for B2B DevOps sales targeting and extract scoring data.
+  const prompt = `Analyze this company for B2B software development sales targeting and extract scoring data.
 
 COMPANY:
 Name: ${company.company_name}
@@ -115,13 +115,13 @@ RECENT SIGNALS:
 ${signalSummary}
 
 OUR ICP:
-${companyProfile || `Tech-stack.io - 200+ DevOps engineers
-Target: Companies needing DevOps/Platform engineering help
+${companyProfile || `Tech-stack.io - 200+ software engineers
+Target: Companies needing DevOps/software engineering help
 Best fit: Recently funded, scaling, hiring engineers`}
 
 SCORING CRITERIA TO EXTRACT:
-1. Outsource Buyer Intent (yes/no) - Do they show intent to outsource DevOps?
-2. Actively Hiring (yes/no) - Are they hiring DevOps/Platform/SRE engineers?
+1. Outsource Buyer Intent (yes/no) - Do they show intent to outsource software development?
+2. Actively Hiring (yes/no) - Are they hiring DevOps/Platform/software engineers?
 3. Last Funding Date (0-1m, 2-6m, 6m-1y, 1y-3y, 3y-5y, >5y, unknown)
 4. Funding Stage (Seed, Series A, Series B, Series C, Private Equity, IPO, unknown)
 5. Funding Amount (<100k, 100k-500k, 500k-2m, 2m-5m, 5m-20m, >20m, unknown)

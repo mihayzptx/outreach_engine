@@ -92,7 +92,7 @@ const defaultICPSettings: ICPSettings = {
   companyAge: { min: 2, max: 15, weight: 5 },
   buyingSignals: [
     { name: 'Recently Funded', points: 20, enabled: true },
-    { name: 'Hiring DevOps/Platform Engineers', points: 15, enabled: true },
+    { name: 'Hiring Engineers', points: 15, enabled: true },
     { name: 'New CTO/VP Engineering', points: 12, enabled: true },
     { name: 'Post-Acquisition Integration', points: 15, enabled: true },
     { name: 'Rapid Headcount Growth', points: 10, enabled: true },
@@ -102,7 +102,7 @@ const defaultICPSettings: ICPSettings = {
     { name: 'Security/Compliance Needs', points: 10, enabled: true }
   ],
   negativeSignals: [
-    { name: 'Large Internal DevOps Team', points: -15, enabled: true },
+    { name: 'Large Internal Software Team', points: -15, enabled: true },
     { name: 'Recent Layoffs', points: -10, enabled: true },
     { name: 'Competitor Customer', points: -20, enabled: true },
     { name: 'Government/Public Sector', points: -5, enabled: true },
@@ -163,7 +163,7 @@ const defaultSettings: Settings = {
     "The [specific news] about [company] is interesting...",
     "Congrats on [specific achievement]..."
   ],
-  companyDescription: "Tech-stack.io is a 200+ person DevOps services company headquartered in Houston, TX. We help companies scale their infrastructure, implement CI/CD, and augment their platform teams.",
+  companyDescription: "Tech-stack.io is a 200+ person software development services company headquartered in Ukraine. We help companies scale their infrastructure, implement CI/CD, and augment their platform teams.",
   services: [
     "Cloud Infrastructure Optimization (AWS, GCP, Azure)",
     "CI/CD Implementation (Jenkins, GitLab CI, GitHub Actions)",
