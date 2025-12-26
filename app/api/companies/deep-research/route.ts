@@ -383,7 +383,7 @@ Return ONLY the JSON object.`
       }
 
       try {
-        await sql.query(
+        const updateResult = await sql.query(
           `UPDATE saved_companies 
            SET signal_data = $1::jsonb,
                research_links_data = $2::jsonb,
@@ -397,7 +397,8 @@ Return ONLY the JSON object.`
                funding_stage = COALESCE(NULLIF($9, ''), funding_stage),
                funding_amount = COALESCE(NULLIF($10, ''), funding_amount),
                updated_at = NOW()
-           WHERE id = $11`,
+           WHERE id = $11
+           RETURNING id, company_name`,
           [
             JSON.stringify(signalData),
             JSON.stringify(linksData),
@@ -412,6 +413,11 @@ Return ONLY the JSON object.`
             effectiveCompanyId
           ]
         )
+        if (updateResult.rowCount && updateResult.rowCount > 0) {
+          progress.push(`Updated company: ${updateResult.rows[0]?.company_name} (ID: ${effectiveCompanyId})`)
+        } else {
+          errors.push(`No rows updated for ID: ${effectiveCompanyId}`)
+        }
       } catch (dbError: any) {
         console.error('Database update failed:', dbError)
         errors.push(`DB error: ${dbError.message}`)
