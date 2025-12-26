@@ -284,7 +284,38 @@ Return ONLY the JSON object.`
     progress.push('Research complete')
 
     // PHASE 4: Store in database
-    if (company_id && company_id > 0) {
+    // Find or create company first if company_id is 0
+    let effectiveCompanyId = company_id
+    
+    if (!effectiveCompanyId || effectiveCompanyId === 0) {
+      try {
+        // Try to find existing company by name
+        const existingResult = await sql`
+          SELECT id FROM saved_companies 
+          WHERE LOWER(company_name) = LOWER(${company_name})
+          LIMIT 1
+        `
+        
+        if (existingResult.rows.length > 0) {
+          effectiveCompanyId = existingResult.rows[0].id
+          progress.push(`Found existing company ID: ${effectiveCompanyId}`)
+        } else {
+          // Create new company
+          const insertResult = await sql`
+            INSERT INTO saved_companies (company_name, industry, source, created_at, updated_at)
+            VALUES (${company_name}, ${industry || research.companyInfo.industry || ''}, 'chrome_extension', NOW(), NOW())
+            RETURNING id
+          `
+          effectiveCompanyId = insertResult.rows[0].id
+          progress.push(`Created new company ID: ${effectiveCompanyId}`)
+        }
+      } catch (findError: any) {
+        console.error('Find/create company error:', findError)
+        errors.push(`Company lookup error: ${findError.message}`)
+      }
+    }
+    
+    if (effectiveCompanyId && effectiveCompanyId > 0) {
       // Prepare signal data in expected format
       const signalData = {
         detected: research.signals.map(s => ({
@@ -378,7 +409,7 @@ Return ONLY the JSON object.`
             research.companyInfo.headquarters !== 'unknown' ? research.companyInfo.headquarters : null,
             research.fundingHistory.lastRound !== 'unknown' ? research.fundingHistory.lastRound : null,
             research.fundingHistory.lastRoundAmount !== 'unknown' ? research.fundingHistory.lastRoundAmount : null,
-            company_id
+            effectiveCompanyId
           ]
         )
       } catch (dbError: any) {
@@ -391,6 +422,7 @@ Return ONLY the JSON object.`
     return NextResponse.json({
       success: true,
       research,
+      company_id: effectiveCompanyId,
       stats: {
         sourcesSearched: searchQueries.length,
         sourcesFound: uniqueResults.length,

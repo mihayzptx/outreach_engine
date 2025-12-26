@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/gmail/callback'
+const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/gmail/callback'
 
 export async function GET() {
   if (!GOOGLE_CLIENT_ID) {
