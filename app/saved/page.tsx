@@ -514,12 +514,12 @@ export default function SavedPage() {
                   {/* Info Grid */}
                   <div className="grid grid-cols-4 gap-2">
                     {[
-                      { label: 'Employees', value: selected.employee_count },
+                      { label: 'Employees', value: selected.employee_count || selected.extracted_info?.employeeCount },
                       { label: 'Revenue', value: selected.revenue_range },
-                      { label: 'Funding', value: selected.funding_stage },
-                      { label: 'Amount', value: selected.funding_amount },
-                      { label: 'Founded', value: selected.founded_year },
-                      { label: 'Location', value: selected.country },
+                      { label: 'Funding', value: selected.funding_stage || selected.extracted_info?.lastRound },
+                      { label: 'Amount', value: selected.funding_amount || selected.extracted_info?.lastRoundAmount },
+                      { label: 'Founded', value: selected.founded_year || selected.extracted_info?.founded },
+                      { label: 'Location', value: selected.country || selected.extracted_info?.headquarters },
                       { label: 'Hiring', value: selected.is_hiring ? 'Yes' : 'No', highlight: selected.is_hiring },
                       { label: 'Intent', value: selected.buyer_intent ? 'Yes' : 'No', highlight: selected.buyer_intent }
                     ].map((item, i) => (
@@ -529,6 +529,60 @@ export default function SavedPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Description from extracted_info */}
+                  {selected.extracted_info?.description && (
+                    <div className="bg-zinc-950 rounded-lg p-3">
+                      <p className="text-[10px] text-zinc-500 uppercase mb-2">About</p>
+                      <p className="text-zinc-300 text-sm">{selected.extracted_info.description}</p>
+                    </div>
+                  )}
+
+                  {/* Pain Points & Outreach Angles from extracted_info */}
+                  {((selected.extracted_info?.painPoints && selected.extracted_info.painPoints.length > 0) || (selected.extracted_info?.outreachAngles && selected.extracted_info.outreachAngles.length > 0)) && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {selected.extracted_info?.painPoints && selected.extracted_info.painPoints.length > 0 && (
+                        <div className="bg-zinc-950 rounded-lg p-3">
+                          <p className="text-[10px] text-zinc-500 uppercase mb-2">💢 Pain Points</p>
+                          <div className="flex flex-wrap gap-1">
+                            {selected.extracted_info.painPoints.map((p: string, i: number) => (
+                              <span key={i} className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">{p}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {selected.extracted_info?.outreachAngles && selected.extracted_info.outreachAngles.length > 0 && (
+                        <div className="bg-zinc-950 rounded-lg p-3">
+                          <p className="text-[10px] text-zinc-500 uppercase mb-2">💡 Outreach Angles</p>
+                          <div className="space-y-1">
+                            {selected.extracted_info.outreachAngles.slice(0, 3).map((a: string, i: number) => (
+                              <p key={i} className="text-xs text-yellow-400 border-l-2 border-yellow-400 pl-2">{a}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Key People from extracted_info */}
+                  {selected.extracted_info?.keyPeople && selected.extracted_info.keyPeople.length > 0 && (
+                    <div className="bg-zinc-950 rounded-lg p-3">
+                      <p className="text-[10px] text-zinc-500 uppercase mb-2">👥 Key People</p>
+                      <div className="space-y-2">
+                        {selected.extracted_info.keyPeople.slice(0, 3).map((person: { name?: string; title?: string }, i: number) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 text-xs font-bold">
+                              {person.name?.charAt(0) || '?'}
+                            </div>
+                            <div>
+                              <p className="text-white text-sm">{person.name}</p>
+                              <p className="text-zinc-500 text-xs">{person.title}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Contact */}
                   <div className="bg-zinc-950 rounded-lg p-3">
